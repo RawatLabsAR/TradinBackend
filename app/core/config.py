@@ -1,10 +1,14 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
@@ -45,7 +49,7 @@ class Settings(BaseSettings):
         "ADA-USD,AVAX-USD,MATIC-USD,DOT-USD,LINK-USD"
     )
 
-    # AI / News settings
+    # AI / News settings (OPENAI_API_KEY loaded from .env)
     OPENAI_API_KEY: str = ""
     AI_MODEL: str = "gpt-4o-mini"
     AI_CACHE_MINUTES: int = 60
