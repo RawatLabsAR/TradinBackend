@@ -110,7 +110,7 @@ async def _get_recent_gnews_articles(
     result = await session.execute(
         select(NewsArticle)
         .where(NewsArticle.published_at >= cutoff)
-        .where(func.json_contains(NewsArticle.symbols, f'"{sym}"') == 1)
+        .where(NewsArticle.symbols.contains([sym]))
         .order_by(desc(NewsArticle.published_at))
         .limit(limit)
     )
@@ -425,4 +425,29 @@ async def refresh_insights_for_symbols(
             logger.debug("Scheduler: %s AI memory cache still fresh, skipping", symbol)
             continue
         logger.info("Scheduler: generating AI insights for %s via web search", symbol)
-        await get_insights(session, symbol)
+        result = await get_insights(session, symbol)
+        if (
+            settings.ENABLE_AI_BROADCAST
+            and settings.TELEGRAM_BOT_TOKEN
+            and session is not None
+            and isinstance(result, dict)
+            and result.get("summary")
+        ):
+            try:
+                from app.broadcast.services.broadcast_service import broadcast_service
+
+                drivers = (result.get("positive_factors") or [])[:3]
+                message = await broadcast_service.send_ai_broadcast(
+                    db=session,
+                    symbol=symbol,
+                    summary=result["summary"],
+                    sentiment=result.get("sentiment"),
+                    confidence=result.get("confidence"),
+                    drivers=drivers,
+                )
+                await session.commit()
+                if broadcast_service._queue is not None:
+                    await broadcast_service.enqueue_committed_message(message)
+            except Exception as exc:
+                logger.warning("AI broadcast failed for %s: %s", symbol, exc)
+                await session.rollback()

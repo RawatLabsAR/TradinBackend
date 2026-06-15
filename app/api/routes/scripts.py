@@ -9,11 +9,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import client_meta, get_current_user
 from app.db.database import get_db
+from app.models.user import User
+from app.services.activity_service import log_activity
 from app.models.script import (
     Script, ScriptVersion, StrategyRun, SignalHistory,
     BacktestResult as BacktestResultModel,
@@ -44,18 +47,17 @@ router = APIRouter(prefix="/scripts", tags=["scripts"])
 async def list_scripts(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     offset = (page - 1) * page_size
-    total_q = await db.execute(select(func.count(Script.id)).where(Script.is_active == True))
-    total = total_q.scalar() or 0
+    filters = [Script.is_active == True]
+    if user.role != "admin":
+        filters.append(Script.user_id == user.id)
+    total = (await db.execute(select(func.count(Script.id)).where(*filters))).scalar() or 0
 
     result = await db.execute(
-        select(Script)
-        .where(Script.is_active == True)
-        .order_by(Script.updated_at.desc())
-        .offset(offset)
-        .limit(page_size)
+        select(Script).where(*filters).order_by(Script.updated_at.desc()).offset(offset).limit(page_size)
     )
     scripts = result.scalars().all()
 
@@ -70,11 +72,14 @@ async def list_scripts(
 @router.post("/", response_model=ScriptResponse, status_code=201)
 async def create_script(
     payload: ScriptCreate,
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     # Validate before storing
     vr = validate(payload.source)
     script = Script(
+        user_id=user.id,
         name=payload.name,
         description=payload.description,
         source=payload.source,
@@ -89,6 +94,17 @@ async def create_script(
     # Store initial version
     version = ScriptVersion(script_id=script.id, version=1, source=payload.source)
     db.add(version)
+    ip, ua = client_meta(request)
+    await log_activity(
+        db,
+        user=user,
+        action="script.create",
+        resource_type="script",
+        resource_id=str(script.id),
+        detail=f"Created script {script.name}",
+        ip_address=ip,
+        user_agent=ua,
+    )
     await db.commit()
     await db.refresh(script)
     return ScriptResponse.model_validate(script)
@@ -167,10 +183,19 @@ async def validate_source(payload: ValidateRequest):
 async def run_script(
     symbol: str,
     payload: RunRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Execute a Pine Script DSL script against historical candles for `symbol`."""
-    return await _execute_run(symbol, payload, db, script_id=None)
+    result = await _execute_run(symbol, payload, db, script_id=None)
+    ip, ua = client_meta(request)
+    await log_activity(
+        db, user=user, action="script.run", resource_type="symbol", resource_id=symbol.upper(),
+        detail=f"Ran strategy on {symbol.upper()}", ip_address=ip, user_agent=ua,
+    )
+    await db.commit()
+    return result
 
 
 @router.post("/{script_id}/run/{symbol}", response_model=RunResponse)
@@ -178,9 +203,21 @@ async def run_saved_script(
     script_id: int,
     symbol: str,
     payload: RunRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _execute_run(symbol, payload, db, script_id=script_id)
+    script = await _get_or_404(db, script_id)
+    if user.role != "admin" and script.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    result = await _execute_run(symbol, payload, db, script_id=script_id)
+    ip, ua = client_meta(request)
+    await log_activity(
+        db, user=user, action="script.run", resource_type="script", resource_id=str(script_id),
+        detail=f"Ran script {script.name} on {symbol.upper()}", ip_address=ip, user_agent=ua,
+    )
+    await db.commit()
+    return result
 
 
 # ─────────────────────────── Backtesting ─────────────────────────────────────
@@ -189,9 +226,18 @@ async def run_saved_script(
 async def backtest_script(
     symbol: str,
     payload: BacktestRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _execute_backtest(symbol, payload, db, script_id=None)
+    result = await _execute_backtest(symbol, payload, db, script_id=None)
+    ip, ua = client_meta(request)
+    await log_activity(
+        db, user=user, action="script.backtest", resource_type="symbol", resource_id=symbol.upper(),
+        detail=f"Backtest on {symbol.upper()}", ip_address=ip, user_agent=ua,
+    )
+    await db.commit()
+    return result
 
 
 @router.post("/{script_id}/backtest/{symbol}", response_model=BacktestResponse)
@@ -199,9 +245,21 @@ async def backtest_saved_script(
     script_id: int,
     symbol: str,
     payload: BacktestRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _execute_backtest(symbol, payload, db, script_id=script_id)
+    script = await _get_or_404(db, script_id)
+    if user.role != "admin" and script.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    result = await _execute_backtest(symbol, payload, db, script_id=script_id)
+    ip, ua = client_meta(request)
+    await log_activity(
+        db, user=user, action="script.backtest", resource_type="script", resource_id=str(script_id),
+        detail=f"Backtest script {script.name} on {symbol.upper()}", ip_address=ip, user_agent=ua,
+    )
+    await db.commit()
+    return result
 
 
 # ─────────────────────────── Signals ─────────────────────────────────────────

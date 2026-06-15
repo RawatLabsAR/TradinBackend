@@ -88,8 +88,31 @@ async def create_tables() -> None:
         raise RuntimeError("DATABASE_URL is not configured")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await ensure_auth_columns()
+
+
+async def ensure_auth_columns() -> None:
+    """Add user_id columns to existing tables (idempotent on PostgreSQL)."""
+    if engine is None:
+        return
+    from sqlalchemy import text
+
+    statements = [
+        "ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE scripts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
 
 
 async def dispose_engine() -> None:
     if engine is not None:
         await engine.dispose()
+
+
+def database_available() -> bool:
+    return engine is not None

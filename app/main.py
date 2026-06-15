@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
-from app.db.database import AsyncSessionLocal, create_tables, dispose_engine
+from app.db.database import AsyncSessionLocal, create_tables, dispose_engine, database_available
 from app.db.retention_scheduler import attach_retention_scheduler
 from app.providers.registry import build_ws_client, close_market_session
 from app.websocket.manager import ws_manager
@@ -20,6 +20,10 @@ from app.api.routes import alerts as alerts_router
 from app.api.routes import onchain as onchain_router
 from app.api.routes import token_search as token_search_router
 from app.api.routes import discovery as discovery_router
+from app.api.routes import analytics as analytics_router
+from app.api.routes import auth as auth_router
+from app.api.routes import admin as admin_router
+from app.services.user_service import ensure_admin_user
 from app.services.news.news_scheduler import create_scheduler
 from app.services.alert_service import check_alerts_for_ticker
 from app.broadcast.services.broadcast_service import broadcast_service
@@ -28,6 +32,8 @@ from app.broadcast.templates.template_engine import template_engine
 from app.onchain.schedulers.onchain_scheduler import attach_onchain_scheduler
 from app.token_search.schedulers.search_scheduler import attach_token_search_scheduler
 from app.discovery.schedulers.discovery_scheduler import attach_discovery_scheduler
+from app.discovery.cache.discovery_cache import get_cached_discovery
+from app.discovery.services.discovery_service import discovery_service
 from app.onchain.collectors.base import close_session as close_onchain_session
 from app.integrations.telegram.telegram_service import get_telegram_service, init_telegram_service
 import app.models  # ensure all models are registered with Base before create_tables()
@@ -60,6 +66,10 @@ async def lifespan(app: FastAPI):
     try:
         await create_tables()
         logger.info("Database tables ready")
+        if AsyncSessionLocal is not None:
+            async with AsyncSessionLocal() as db:
+                await ensure_admin_user(db)
+                await db.commit()
     except Exception as exc:
         logger.warning(
             "Database unavailable (%s) — running without persistence", exc
@@ -84,6 +94,16 @@ async def lifespan(app: FastAPI):
     attach_retention_scheduler(scheduler)
     scheduler.start()
     logger.info("Background schedulers started")
+
+    # Warm discovery cache on first boot when empty
+    try:
+        cached = await get_cached_discovery("new_dex")
+        if not cached or not cached.scanned_at:
+            logger.info("Discovery cache empty — running initial scan in background")
+            import asyncio
+            asyncio.create_task(discovery_service.run_full_scan())
+    except Exception as exc:
+        logger.warning("Discovery startup scan skipped: %s", exc)
 
     # ── Telegram + Broadcast ─────────────────────────────────────────────────
     if settings.TELEGRAM_BOT_TOKEN:
@@ -172,6 +192,9 @@ app.include_router(alerts_router.router, prefix=API_PREFIX)
 app.include_router(onchain_router.router, prefix=API_PREFIX)
 app.include_router(token_search_router.router, prefix=API_PREFIX)
 app.include_router(discovery_router.router, prefix=API_PREFIX)
+app.include_router(analytics_router.router, prefix=API_PREFIX)
+app.include_router(auth_router.router, prefix=API_PREFIX)
+app.include_router(admin_router.router, prefix=API_PREFIX)
 
 # WebSocket router (no /api prefix — client connects directly to /ws)
 app.include_router(ws_router.router)
@@ -179,12 +202,21 @@ app.include_router(ws_router.router)
 
 @app.get("/health", tags=["health"])
 async def health_check():
+    discovery_cached = bool(await get_cached_discovery("new_dex"))
     return {
         "status": "ok",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "ws_connections": ws_manager.active_connections,
         "ws_subscribed_products": ws_manager.subscribed_products,
+        "capabilities": {
+            "database": database_available(),
+            "openai": bool(settings.OPENAI_API_KEY),
+            "telegram": bool(settings.TELEGRAM_BOT_TOKEN),
+            "onchain_persistence": settings.ENABLE_ONCHAIN_PERSISTENCE,
+            "data_provider": settings.DATA_PROVIDER,
+            "discovery_cached": discovery_cached,
+        },
     }
 
 

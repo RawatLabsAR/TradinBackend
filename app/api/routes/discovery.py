@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from app.core.auth import require_admin
+from app.models.user import User
 
 from app.discovery.services.discovery_service import discovery_service
 from app.discovery.types import DiscoveryToken
@@ -23,6 +25,11 @@ def _to_schema(token: DiscoveryToken) -> DiscoveryTokenSchema:
 
 
 def _to_response(result) -> DiscoveryResponse:
+    empty_reason = None
+    if not result.scanned_at and not result.items:
+        empty_reason = "not_scanned_yet"
+    elif result.scanned_at and not result.items:
+        empty_reason = "no_matches"
     return DiscoveryResponse(
         category=result.category,
         total=len(result.items),
@@ -30,6 +37,7 @@ def _to_response(result) -> DiscoveryResponse:
         sources_used=result.sources_used,
         scanned_at=result.scanned_at,
         cached=result.cached,
+        empty_reason=empty_reason,
     )
 
 
@@ -106,13 +114,16 @@ async def discover_trending(
 
 
 @router.post("/scan", response_model=StatusResponse)
-async def trigger_discovery_scan() -> StatusResponse:
+async def trigger_discovery_scan(
+    admin: User = Depends(require_admin),
+) -> StatusResponse:
     """Manually run a full discovery scan (in-memory cache only)."""
     try:
         await discovery_service.run_full_scan()
+        return StatusResponse(status="ok")
     except Exception as exc:
         logger.exception("Discovery scan endpoint error: %s", exc)
-    return StatusResponse(status="ok")
+        raise HTTPException(status_code=500, detail=f"Discovery scan failed: {exc}") from exc
 
 
 @router.get("/overview", response_model=DiscoveryOverviewResponse)

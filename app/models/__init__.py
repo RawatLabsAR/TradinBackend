@@ -18,6 +18,8 @@ from app.models.broadcast import (
     SignalBroadcastHistory,
 )
 from app.models.price_alert import PriceAlert
+from app.models.user import User
+from app.models.activity_log import ActivityLog
 from app.onchain.models.entities import (
     OnchainTrade,
     OnchainOhlcv,
@@ -51,6 +53,8 @@ __all__ = [
     "ScheduledBroadcast",
     "SignalBroadcastHistory",
     "PriceAlert",
+    "User",
+    "ActivityLog",
     "OnchainTrade",
     "OnchainOhlcv",
     "WalletStat",

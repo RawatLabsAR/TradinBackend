@@ -21,7 +21,7 @@ class Chain(str, Enum):
 
 
 EVM_CHAINS = {Chain.ETHEREUM, Chain.BASE, Chain.BSC, Chain.ARBITRUM, Chain.POLYGON, Chain.AVALANCHE}
-SUPPORTED_CHAINS = {Chain.ETHEREUM, Chain.BASE, Chain.SOLANA}
+SUPPORTED_CHAINS = {Chain.ETHEREUM, Chain.BASE, Chain.SOLANA, Chain.BSC}
 
 
 def normalize_address(chain: str, address: str) -> str:

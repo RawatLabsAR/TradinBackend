@@ -19,13 +19,11 @@ _LAST_PRICE_TTL = 3600  # 1 hour — enough for cross-detection, survives brief 
 
 
 def _crossed(price: float, target: float, direction: str, prev_price: float | None) -> bool:
+    if prev_price is None:
+        return False
     if direction == "above":
-        if prev_price is not None:
-            return prev_price < target <= price
-        return price >= target
-    if prev_price is not None:
-        return prev_price > target >= price
-    return price <= target
+        return prev_price < target <= price
+    return prev_price > target >= price
 
 
 def _get_prev_price(product_id: str) -> float | None:
@@ -50,6 +48,9 @@ async def check_alerts_for_ticker(ticker: dict) -> None:
     product_key = product_id.upper()
     prev = _get_prev_price(product_key)
     _set_prev_price(product_key, price)
+
+    if AsyncSessionLocal is None:
+        return
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -111,9 +112,17 @@ async def check_alerts_for_ticker(ticker: dict) -> None:
                 await db.rollback()
 
 
-async def list_alerts(db: AsyncSession, product_id: str | None = None) -> list[PriceAlert]:
+async def list_alerts(
+    db: AsyncSession,
+    product_id: str | None = None,
+    *,
+    user_id: int | None = None,
+    admin: bool = False,
+) -> list[PriceAlert]:
     q = select(PriceAlert).order_by(PriceAlert.created_at.desc())
     if product_id:
         q = q.where(PriceAlert.product_id == product_id.upper())
+    if not admin and user_id is not None:
+        q = q.where(PriceAlert.user_id == user_id)
     result = await db.execute(q)
     return list(result.scalars().all())

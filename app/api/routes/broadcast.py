@@ -20,7 +20,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request
+from app.core.auth import client_meta, get_current_user
+from app.models.user import User
+from app.services.activity_service import log_activity
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +58,8 @@ signal_router = APIRouter(prefix="/signals", tags=["signals"])
 async def send_broadcast(
     payload: BroadcastSendRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BroadcastMessageOut:
     """Queue an instant broadcast to one or more Telegram channels."""
@@ -66,6 +71,17 @@ async def send_broadcast(
         channel_ids=payload.channel_ids,
         template_id=payload.template_id,
         template_variables=payload.template_variables,
+    )
+    ip, ua = client_meta(request)
+    await log_activity(
+        db,
+        user=user,
+        action="broadcast.send",
+        resource_type="broadcast",
+        resource_id=str(message.id),
+        detail=payload.title or "Manual broadcast",
+        ip_address=ip,
+        user_agent=ua,
     )
     await db.commit()
     await db.refresh(message)

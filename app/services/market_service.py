@@ -82,10 +82,16 @@ async def get_product_detail(product_id: str) -> Optional[dict]:
     cache_key = f"product:{product_id}"
     cached = cache.get(cache_key)
     if cached is not None:
-        return cached
+        price = float(cached.get("price") or cached.get("mid_market_price") or 0)
+        if price > 0:
+            return cached
+        cache.delete(cache_key)
 
     try:
         data = await _provider().get_product(product_id)
+        price = float(data.get("price") or data.get("mid_market_price") or 0)
+        if price <= 0:
+            return None
         cache.set(cache_key, data, settings.CACHE_TTL_PRODUCTS)
         return data
     except Exception as exc:

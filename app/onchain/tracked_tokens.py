@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import HTTPException
 
+from app.core.config import settings
 from app.onchain.types import normalize_address
 
-TRACKED_TOKENS: list[dict[str, str]] = [
+_DEFAULT_TRACKED: list[dict[str, str]] = [
     {
         "id": "troll",
         "name": "Troll",
@@ -45,6 +48,40 @@ TRACKED_TOKENS: list[dict[str, str]] = [
 ]
 
 
+def _parse_env_tokens(raw: str) -> list[dict[str, str]]:
+    raw = raw.strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [t for t in parsed if isinstance(t, dict) and t.get("token_address")]
+    except json.JSONDecodeError:
+        pass
+    tokens = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if ":" not in part:
+            continue
+        chain, addr = part.split(":", 1)
+        tokens.append({
+            "id": addr[:8],
+            "name": addr[:8],
+            "symbol": addr[:6].upper(),
+            "chain": chain.strip().lower(),
+            "token_address": addr.strip(),
+        })
+    return tokens
+
+
+def _load_tracked_tokens() -> list[dict[str, str]]:
+    env_tokens = _parse_env_tokens(settings.ONCHAIN_TRACKED_TOKENS)
+    return env_tokens if env_tokens else _DEFAULT_TRACKED
+
+
+TRACKED_TOKENS: list[dict[str, str]] = _load_tracked_tokens()
+
+
 def get_tracked_tokens() -> list[dict[str, str]]:
     return [
         {"chain": t["chain"], "token_address": t["token_address"]}
@@ -69,7 +106,10 @@ def require_tracked_token(chain: str, address: str) -> dict[str, str]:
     token = find_tracked_token(chain, address)
     if token is None:
         raise HTTPException(
-            status_code=400,
-            detail="On-chain analysis is limited to the curated token list.",
+            status_code=403,
+            detail={
+                "code": "not_tracked",
+                "message": "This token is not in the curated on-chain list. Use /analyze for live data or POST /sync after adding to ONCHAIN_TRACKED_TOKENS.",
+            },
         )
     return token

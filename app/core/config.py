@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     GATE_FUTURES_WS_URL: str = "wss://fx-ws.gateio.ws/v4/ws/usdt"
     GATE_DELIVERY_WS_URL: str = "wss://fx-ws.gateio.ws/v4/ws/delivery/usdt"
 
+    # ── Auth / users ──────────────────────────────────────────────────────────
+    JWT_SECRET: str = "change-me-in-production-use-long-random-string"
+    JWT_EXPIRE_HOURS: int = 72
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = ""
+    RETENTION_ACTIVITY_DAYS: int = 90
+
     FRONTEND_URL: str = "http://localhost:5173"
     # Comma-separated extra origins (e.g. production + preview Vercel URLs)
     ALLOWED_ORIGINS: str = ""

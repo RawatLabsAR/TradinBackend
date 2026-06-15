@@ -15,4 +15,5 @@ apscheduler>=3.10.0
 # Pine Script DSL engine
 lark>=1.1.0
 pandas>=2.0.0
-numpy>=1.24.0
+PyJWT>=2.10.0
+bcrypt>=4.2.0
