@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import require_admin
 from app.db.database import get_db
+from app.models.user import User
+from app.services.activity_service import log_request_action
 from app.integrations.telegram.telegram_service import get_telegram_service
 from app.integrations.telegram.channel_manager import ChannelManager
 from app.schemas.broadcast import (
@@ -54,6 +57,7 @@ def _require_telegram_service():
 @router.get("/channels", response_model=list[TelegramChannelOut])
 async def list_channels(
     active_only: bool = True,
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[TelegramChannelOut]:
     mgr = _get_channel_manager()
@@ -64,6 +68,8 @@ async def list_channels(
 @router.post("/channels", response_model=TelegramChannelOut, status_code=201)
 async def add_channel(
     payload: TelegramChannelCreate,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> TelegramChannelOut:
     mgr = _get_channel_manager()
@@ -83,6 +89,14 @@ async def add_channel(
         send_news=payload.send_news,
         cooldown_sec=payload.cooldown_sec,
     )
+    await log_request_action(
+        db, request, admin,
+        action="telegram.channel.create",
+        resource_type="telegram_channel",
+        resource_id=str(channel.id),
+        detail=f"Added Telegram channel {payload.name} ({payload.chat_id})",
+        metadata={"chat_id": payload.chat_id, "channel_type": payload.channel_type},
+    )
     await db.commit()
     await db.refresh(channel)
     return TelegramChannelOut.model_validate(channel)
@@ -91,6 +105,7 @@ async def add_channel(
 @router.get("/channels/{channel_id}", response_model=TelegramChannelOut)
 async def get_channel(
     channel_id: int,
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> TelegramChannelOut:
     mgr = _get_channel_manager()
@@ -104,6 +119,8 @@ async def get_channel(
 async def update_channel(
     channel_id: int,
     payload: TelegramChannelUpdate,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> TelegramChannelOut:
     mgr = _get_channel_manager()
@@ -112,6 +129,14 @@ async def update_channel(
     )
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
+    await log_request_action(
+        db, request, admin,
+        action="telegram.channel.update",
+        resource_type="telegram_channel",
+        resource_id=str(channel_id),
+        detail=f"Updated Telegram channel {channel.name}",
+        metadata=payload.model_dump(exclude_unset=True),
+    )
     await db.commit()
     await db.refresh(channel)
     return TelegramChannelOut.model_validate(channel)
@@ -120,19 +145,29 @@ async def update_channel(
 @router.delete("/channels/{channel_id}", status_code=204)
 async def delete_channel(
     channel_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     mgr = _get_channel_manager()
+    channel = await mgr.get_channel(db, channel_id)
     ok = await mgr.delete_channel(db, channel_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Channel not found")
+    await log_request_action(
+        db, request, admin,
+        action="telegram.channel.delete",
+        resource_type="telegram_channel",
+        resource_id=str(channel_id),
+        detail=f"Removed Telegram channel #{channel_id}" + (f" ({channel.name})" if channel else ""),
+    )
     await db.commit()
 
 
 # ── Bot connection tests ──────────────────────────────────────────────────────
 
 @router.post("/test", response_model=TelegramBotTestResponse)
-async def test_bot_connection() -> TelegramBotTestResponse:
+async def test_bot_connection(_admin: User = Depends(require_admin)) -> TelegramBotTestResponse:
     """Verify the configured bot token is valid."""
     svc = _require_telegram_service()
     result = await svc.test_connection()
@@ -145,14 +180,20 @@ async def test_bot_connection() -> TelegramBotTestResponse:
 
 
 @router.post("/validate", response_model=dict)
-async def validate_chat(payload: TelegramValidateChatRequest) -> dict:
+async def validate_chat(
+    payload: TelegramValidateChatRequest,
+    _admin: User = Depends(require_admin),
+) -> dict:
     """Validate that the bot has access to the given chat_id."""
     svc = _require_telegram_service()
     return await svc.validate_channel(payload.chat_id.strip())
 
 
 @router.post("/send-test", response_model=TelegramSendTestResponse)
-async def send_test_message(payload: TelegramSendTestRequest) -> TelegramSendTestResponse:
+async def send_test_message(
+    payload: TelegramSendTestRequest,
+    _admin: User = Depends(require_admin),
+) -> TelegramSendTestResponse:
     """Send a test message to a specific chat_id."""
     chat_id = payload.chat_id.strip()
     svc = _require_telegram_service()
@@ -167,6 +208,7 @@ async def send_test_message(payload: TelegramSendTestRequest) -> TelegramSendTes
 
 @router.get("/discover", response_model=DiscoverChatsResponse)
 async def discover_chats(
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> DiscoverChatsResponse:
     """

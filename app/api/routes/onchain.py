@@ -11,17 +11,20 @@ from typing import Literal, Optional
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.auth import require_admin
 from app.db.database import get_db
+from app.models.user import User
 from app.onchain.services.onchain_service import onchain_service
 from app.onchain.services.live_analysis_service import live_analysis_service
 from app.onchain.tracked_tokens import TRACKED_TOKENS, find_tracked_token, require_tracked_token
 from app.onchain.types import SUPPORTED_CHAINS, validate_token_address
 from app.onchain.utils.time_range import parse_date_param
 from app.onchain.pipelines.etl_pipeline import run_full_etl
+from app.services.activity_service import log_request_action
 from app.schemas.onchain import (
     HolderSnapshotSchema,
     LiquidityEventSchema,
@@ -397,9 +400,11 @@ async def get_wallet_stats(
 @router.post("/sync/{address}", response_model=OnchainSyncResponse)
 async def sync_token_data(
     address: str,
+    request: Request,
     chain: str = _chain_query("ethereum"),
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> OnchainSyncResponse:
     """
@@ -417,6 +422,14 @@ async def sync_token_data(
             db, chain, token_address,
             start_date=since,
             end_date=until,
+        )
+        await log_request_action(
+            db, request, admin,
+            action="onchain.sync",
+            resource_type="token",
+            resource_id=f"{chain}:{token_address}",
+            detail=f"Synced on-chain data for {chain}/{token_address[:10]}…",
+            metadata={"start_date": start_date, "end_date": end_date, **result},
         )
         await db.commit()
         return OnchainSyncResponse(

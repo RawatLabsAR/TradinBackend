@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +11,7 @@ from app.core.auth import client_meta, hash_password, require_admin
 from app.db.database import get_db
 from app.models.user import User
 from app.schemas.auth import (
+    ActivityFilterOptions,
     ActivityListResponse,
     ActivityLogOut,
     UserCreate,
@@ -16,10 +19,21 @@ from app.schemas.auth import (
     UserOut,
     UserUpdate,
 )
-from app.services.activity_service import list_activity, log_activity
+from app.services.activity_service import (
+    KNOWN_ACTIONS,
+    get_activity_filter_options,
+    list_activity,
+    log_activity,
+)
 from app.services.user_service import create_user, list_users
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _activity_out(entry) -> ActivityLogOut:
+    data = ActivityLogOut.model_validate(entry)
+    data.action_label = KNOWN_ACTIONS.get(entry.action, entry.action)
+    return data
 
 
 @router.get("/users", response_model=UserListResponse)
@@ -109,19 +123,50 @@ async def admin_update_user(
     return UserOut.model_validate(user)
 
 
+@router.get("/activity/filters", response_model=ActivityFilterOptions)
+async def admin_activity_filters(
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ActivityFilterOptions:
+    options = await get_activity_filter_options(db)
+    return ActivityFilterOptions.model_validate(options)
+
+
 @router.get("/activity", response_model=ActivityListResponse)
 async def admin_list_activity(
     user_id: int | None = Query(None),
-    action: str | None = Query(None),
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    username: str | None = Query(None, description="Partial username match"),
+    action: str | None = Query(None, description="Exact action code"),
+    action_prefix: str | None = Query(None, description="Action prefix e.g. alert, script"),
+    resource_type: str | None = Query(None),
+    resource_id: str | None = Query(None, description="Partial resource id match"),
+    search: str | None = Query(None, description="Search detail, username, action, resource"),
+    date_from: str | None = Query(None, description="ISO date or datetime (inclusive)"),
+    date_to: str | None = Query(None, description="ISO date or datetime (inclusive)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ActivityListResponse:
     items, total = await list_activity(
-        db, user_id=user_id, action=action, limit=limit, offset=offset
+        db,
+        user_id=user_id,
+        username=username,
+        action=action,
+        action_prefix=action_prefix,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        page_size=page_size,
     )
+    pages = max(1, math.ceil(total / page_size)) if total else 1
     return ActivityListResponse(
-        items=[ActivityLogOut.model_validate(i) for i in items],
+        items=[_activity_out(i) for i in items],
         total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
     )

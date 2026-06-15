@@ -10,9 +10,11 @@ import logging
 import re
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user, require_admin
+from app.models.user import User
 from app.db.database import get_optional_db
 from app.onchain.tracked_tokens import find_tracked_token
 from app.schemas.common import StatusResponse
@@ -31,6 +33,7 @@ from app.token_search.services.search_service import token_search_service
 from app.token_search.services.telegram_alerts import broadcast_token_alert
 from app.token_search.types import NormalizedToken
 from app.token_search.utils.query_utils import normalize_search_query
+from app.services.activity_service import log_request_action
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/token", tags=["token-search"])
@@ -155,6 +158,8 @@ async def get_token_detail(
 @router.post("/record-search", response_model=StatusResponse)
 async def record_search(
     body: RecordSearchRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession | None = Depends(get_optional_db),
 ) -> StatusResponse:
     selected = None
@@ -171,12 +176,29 @@ async def record_search(
         query=body.query,
         selected=selected,
     )
+    if db is not None:
+        await log_request_action(
+            db, request, user,
+            action="token.search.record",
+            resource_type="token_search",
+            resource_id=body.query,
+            detail=f"Searched for {body.query!r}",
+            metadata={
+                "query": body.query,
+                "symbol": body.symbol,
+                "chain": body.chain,
+                "contract_address": body.contract_address,
+            },
+        )
+        await db.commit()
     return StatusResponse(status="ok")
 
 
 @router.post("/broadcast", response_model=BroadcastTokenResponse)
 async def broadcast_token(
     body: BroadcastTokenRequest,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession | None = Depends(get_optional_db),
 ) -> BroadcastTokenResponse:
     token = await token_search_service.get_token_detail(db, body.chain, body.contract_address)
@@ -186,4 +208,14 @@ async def broadcast_token(
     ok = await broadcast_token_alert(db, token, message=body.message)
     if not ok:
         raise HTTPException(status_code=503, detail="Telegram broadcast unavailable")
+    if db is not None:
+        await log_request_action(
+            db, request, admin,
+            action="token.broadcast",
+            resource_type="token",
+            resource_id=f"{body.chain}:{body.contract_address}",
+            detail=f"Broadcast token alert for {token.symbol}",
+            metadata={"symbol": token.symbol, "chain": body.chain, "message": body.message},
+        )
+        await db.commit()
     return BroadcastTokenResponse(status="queued", symbol=token.symbol)

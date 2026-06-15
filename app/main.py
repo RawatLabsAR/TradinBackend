@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -23,6 +24,8 @@ from app.api.routes import discovery as discovery_router
 from app.api.routes import analytics as analytics_router
 from app.api.routes import auth as auth_router
 from app.api.routes import admin as admin_router
+from app.api.routes import paper_trades as paper_trades_router
+from app.api.routes import user_data as user_data_router
 from app.services.user_service import ensure_admin_user
 from app.services.news.news_scheduler import create_scheduler
 from app.services.alert_service import check_alerts_for_ticker
@@ -100,7 +103,6 @@ async def lifespan(app: FastAPI):
         cached = await get_cached_discovery("new_dex")
         if not cached or not cached.scanned_at:
             logger.info("Discovery cache empty — running initial scan in background")
-            import asyncio
             asyncio.create_task(discovery_service.run_full_scan())
     except Exception as exc:
         logger.warning("Discovery startup scan skipped: %s", exc)
@@ -115,13 +117,14 @@ async def lifespan(app: FastAPI):
         )
         attach_broadcast_scheduler(scheduler)
 
-        async with AsyncSessionLocal() as db:
-            try:
-                await template_engine.seed_defaults(db)
-                await db.commit()
-            except Exception as exc:
-                logger.warning("Template seeding skipped: %s", exc)
-                await db.rollback()
+        if AsyncSessionLocal is not None:
+            async with AsyncSessionLocal() as db:
+                try:
+                    await template_engine.seed_defaults(db)
+                    await db.commit()
+                except Exception as exc:
+                    logger.warning("Template seeding skipped: %s", exc)
+                    await db.rollback()
 
         logger.info("Telegram broadcast system started")
     else:
@@ -195,6 +198,8 @@ app.include_router(discovery_router.router, prefix=API_PREFIX)
 app.include_router(analytics_router.router, prefix=API_PREFIX)
 app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(admin_router.router, prefix=API_PREFIX)
+app.include_router(paper_trades_router.router, prefix=API_PREFIX)
+app.include_router(user_data_router.router, prefix=API_PREFIX)
 
 # WebSocket router (no /api prefix — client connects directly to /ws)
 app.include_router(ws_router.router)
@@ -211,9 +216,12 @@ async def health_check():
         "ws_subscribed_products": ws_manager.subscribed_products,
         "capabilities": {
             "database": database_available(),
+            "supabase": settings.is_supabase,
             "openai": bool(settings.OPENAI_API_KEY),
             "telegram": bool(settings.TELEGRAM_BOT_TOKEN),
             "onchain_persistence": settings.ENABLE_ONCHAIN_PERSISTENCE,
+            "discovery_persistence": settings.ENABLE_DISCOVERY_PERSISTENCE,
+            "user_data_sync": database_available(),
             "data_provider": settings.DATA_PROVIDER,
             "discovery_cached": discovery_cached,
         },

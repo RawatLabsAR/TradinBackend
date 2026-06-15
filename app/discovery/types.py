@@ -28,7 +28,7 @@ class DiscoveryToken(NormalizedToken):
 
 
 class DiscoveryResult:
-    """In-memory discovery scan result."""
+    """Discovery scan result — cached in memory and optionally persisted to Postgres."""
 
     def __init__(
         self,

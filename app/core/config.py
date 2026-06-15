@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     ENABLE_NEWS_PERSISTENCE: bool = True
     ENABLE_AI_PERSISTENCE: bool = True
     ENABLE_SEARCH_HISTORY: bool = True
+    ENABLE_DISCOVERY_PERSISTENCE: bool = True
 
     # ── Retention (days) ──────────────────────────────────────────────────────
     RETENTION_NEWS_DAYS: int = 7
@@ -42,6 +43,13 @@ class Settings(BaseSettings):
     RETENTION_SEARCH_HISTORY_DAYS: int = 14
     RETENTION_BROADCAST_LOGS_DAYS: int = 30
     RETENTION_STRATEGY_RUNS_DAYS: int = 60
+    RETENTION_ACTIVITY_DAYS: int = 90
+    RETENTION_PAPER_TRADES_DAYS: int = 365
+    RETENTION_DISCOVERY_DAYS: int = 7
+
+    # Optional — for health checks / future Realtime (backend uses DATABASE_URL)
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
 
     # ── Data provider ──────────────────────────────────────────────────────────
     # Accepted values: "coinbase" | "gate"
@@ -62,7 +70,6 @@ class Settings(BaseSettings):
     JWT_EXPIRE_HOURS: int = 72
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = ""
-    RETENTION_ACTIVITY_DAYS: int = 90
 
     FRONTEND_URL: str = "http://localhost:5173"
     # Comma-separated extra origins (e.g. production + preview Vercel URLs)
@@ -146,6 +153,10 @@ class Settings(BaseSettings):
             if normalized:
                 origins.add(normalized)
         return sorted(origins)
+
+    @property
+    def is_supabase(self) -> bool:
+        return "supabase.co" in self.DATABASE_URL
 
 
 settings = Settings()

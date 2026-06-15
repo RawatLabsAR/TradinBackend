@@ -27,13 +27,36 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     user = await get_user_by_username(db, payload.username)
+    ip, ua = client_meta(request)
     if not user or not verify_password(payload.password, user.password_hash):
+        await log_activity(
+            db,
+            user=None,
+            action="auth.login.failed",
+            resource_type="user",
+            resource_id=payload.username.strip().lower(),
+            detail=f"Failed login attempt for {payload.username.strip().lower()}",
+            metadata={"username": payload.username.strip().lower()},
+            ip_address=ip,
+            user_agent=ua,
+        )
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
     if not user.is_active:
+        await log_activity(
+            db,
+            user=user,
+            action="auth.login.failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            detail=f"Login blocked — account disabled ({user.username})",
+            ip_address=ip,
+            user_agent=ua,
+        )
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
 
     await record_login(db, user)
-    ip, ua = client_meta(request)
     await log_activity(
         db,
         user=user,

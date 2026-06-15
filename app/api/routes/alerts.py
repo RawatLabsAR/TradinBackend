@@ -59,6 +59,12 @@ async def create_alert(
         resource_type="price_alert",
         resource_id=str(alert.id),
         detail=f"Alert on {alert.product_id} {alert.direction} ${alert.target_price}",
+        metadata={
+            "product_id": alert.product_id,
+            "target_price": alert.target_price,
+            "direction": alert.direction,
+            "notify_telegram": alert.notify_telegram,
+        },
         ip_address=ip,
         user_agent=ua,
     )
@@ -83,12 +89,15 @@ async def update_alert(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(alert, field, value)
     ip, ua = client_meta(request)
+    changes = payload.model_dump(exclude_unset=True)
     await log_activity(
         db,
         user=user,
         action="alert.update",
         resource_type="price_alert",
         resource_id=str(alert.id),
+        detail=f"Updated alert #{alert.id} on {alert.product_id}",
+        metadata=changes,
         ip_address=ip,
         user_agent=ua,
     )
@@ -116,6 +125,12 @@ async def delete_alert(
         action="alert.delete",
         resource_type="price_alert",
         resource_id=str(alert.id),
+        detail=f"Deleted alert on {alert.product_id} {alert.direction} ${alert.target_price}",
+        metadata={
+            "product_id": alert.product_id,
+            "target_price": alert.target_price,
+            "direction": alert.direction,
+        },
         ip_address=ip,
         user_agent=ua,
     )

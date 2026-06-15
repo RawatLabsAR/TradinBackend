@@ -1,4 +1,4 @@
-"""In-memory cache for discovery — no database persistence."""
+"""Discovery cache — in-memory with optional Supabase Postgres persistence."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ from typing import Optional
 
 from app.core.cache import cache
 from app.core.config import settings
+from app.db.database import AsyncSessionLocal
 from app.discovery.types import DiscoveryResult, DiscoveryToken
+from app.discovery.utils import discovery_result_from_payload
 
 _CACHE_PREFIX = "discovery:results:"
 _METRICS_PREFIX = "discovery:metrics:"
@@ -24,31 +26,26 @@ def _cache_key(category: str, chain: Optional[str] = None) -> str:
     return f"{_CACHE_PREFIX}{category}"
 
 
+async def _load_from_db(category: str, chain: Optional[str] = None) -> Optional[DiscoveryResult]:
+    if not settings.ENABLE_DISCOVERY_PERSISTENCE or AsyncSessionLocal is None:
+        return None
+    from app.discovery.cache.discovery_store import load_snapshot
+
+    async with AsyncSessionLocal() as db:
+        result = await load_snapshot(db, category, chain)
+        if result:
+            cache.set(_cache_key(category, chain), result.to_dict(), ttl=cache_ttl_seconds())
+        return result
+
+
 async def get_cached_discovery(category: str, chain: Optional[str] = None) -> Optional[DiscoveryResult]:
     data = cache.get(_cache_key(category, chain))
+    if not data and chain:
+        data = cache.get(_cache_key(category))
     if not data:
-        if chain:
-            data = cache.get(_cache_key(category))
-            if not data:
-                return None
-        else:
-            return None
+        return await _load_from_db(category, chain)
 
-    items = [DiscoveryToken.model_validate(t) for t in data.get("items", [])]
-    if chain:
-        chain_lower = chain.lower()
-        items = [
-            t for t in items
-            if t.chain == chain_lower or t.source_type == "cex"
-        ]
-
-    return DiscoveryResult(
-        category=category,
-        items=items,
-        sources_used=data.get("sources_used", []),
-        scanned_at=data.get("scanned_at", ""),
-        cached=True,
-    )
+    return discovery_result_from_payload(data, category=category, chain=chain, cached=True)
 
 
 async def set_cached_discovery(
@@ -62,6 +59,12 @@ async def set_cached_discovery(
             result.to_dict(),
             ttl=ttl or cache_ttl_seconds(),
         )
+        if settings.ENABLE_DISCOVERY_PERSISTENCE and AsyncSessionLocal is not None:
+            from app.discovery.cache.discovery_store import save_snapshot
+
+            async with AsyncSessionLocal() as db:
+                await save_snapshot(db, result, chain)
+                await db.commit()
 
 
 def get_volume_change_pct(token: DiscoveryToken) -> float:

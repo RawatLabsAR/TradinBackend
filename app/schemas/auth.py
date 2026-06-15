@@ -61,11 +61,13 @@ class ActivityLogOut(BaseModel):
     user_id: Optional[int]
     username: Optional[str]
     action: str
+    action_label: Optional[str] = None
     resource_type: Optional[str]
     resource_id: Optional[str]
     detail: Optional[str]
     metadata: Optional[dict[str, Any]] = Field(default=None, validation_alias="meta")
     ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}
@@ -74,3 +76,14 @@ class ActivityLogOut(BaseModel):
 class ActivityListResponse(BaseModel):
     items: list[ActivityLogOut]
     total: int
+    page: int
+    page_size: int
+    pages: int
+
+
+class ActivityFilterOptions(BaseModel):
+    actions: list[str]
+    action_labels: dict[str, str]
+    resource_types: list[str]
+    users: list[dict[str, Any]]
+    action_prefixes: list[str]
