@@ -20,7 +20,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request
+from app.core.auth import client_meta, require_admin
+from app.models.user import User
+from app.services.activity_service import log_activity, log_request_action
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,9 +58,11 @@ signal_router = APIRouter(prefix="/signals", tags=["signals"])
 async def send_broadcast(
     payload: BroadcastSendRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> BroadcastMessageOut:
-    """Queue an instant broadcast to one or more Telegram channels."""
+    """Queue an instant broadcast to one or more Telegram channels (admin only)."""
     message = await broadcast_service.send_manual(
         db=db,
         content=payload.content,
@@ -66,6 +71,17 @@ async def send_broadcast(
         channel_ids=payload.channel_ids,
         template_id=payload.template_id,
         template_variables=payload.template_variables,
+    )
+    ip, ua = client_meta(request)
+    await log_activity(
+        db,
+        user=user,
+        action="broadcast.send",
+        resource_type="broadcast",
+        resource_id=str(message.id),
+        detail=payload.title or "Manual broadcast",
+        ip_address=ip,
+        user_agent=ua,
     )
     await db.commit()
     await db.refresh(message)
@@ -88,6 +104,8 @@ async def send_broadcast(
 @router.post("/schedule", response_model=BroadcastMessageOut, status_code=201)
 async def schedule_broadcast(
     payload: BroadcastScheduleRequest,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> BroadcastMessageOut:
     """Schedule a broadcast for future delivery."""
@@ -100,6 +118,14 @@ async def schedule_broadcast(
         scheduled_at=payload.scheduled_at,
         template_id=payload.template_id,
         template_variables=payload.template_variables,
+    )
+    await log_request_action(
+        db, request, admin,
+        action="broadcast.schedule",
+        resource_type="broadcast",
+        resource_id=str(message.id),
+        detail=f"Scheduled broadcast #{message.id} for {payload.scheduled_at}",
+        metadata={"title": payload.title, "channel_ids": payload.channel_ids},
     )
     await db.commit()
     await db.refresh(message)
@@ -114,6 +140,7 @@ async def get_broadcast_history(
     page_size: int = Query(20, ge=1, le=100),
     message_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PaginatedBroadcastHistory:
     """Return paginated broadcast message history."""
@@ -133,6 +160,7 @@ async def get_broadcast_history(
 @router.get("/history/{message_id}", response_model=BroadcastMessageOut)
 async def get_broadcast_detail(
     message_id: int,
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> BroadcastMessageOut:
     result = await db.execute(
@@ -147,6 +175,7 @@ async def get_broadcast_detail(
 @router.get("/history/{message_id}/logs", response_model=list[BroadcastLogOut])
 async def get_broadcast_logs(
     message_id: int,
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[BroadcastLogOut]:
     result = await db.execute(
@@ -161,6 +190,8 @@ async def get_broadcast_logs(
 @router.delete("/{message_id}", status_code=204)
 async def cancel_broadcast(
     message_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     result = await db.execute(
@@ -171,6 +202,7 @@ async def cancel_broadcast(
         raise HTTPException(status_code=404, detail="Broadcast message not found")
     if msg.status not in ("pending", "queued"):
         raise HTTPException(status_code=400, detail=f"Cannot cancel message with status '{msg.status}'")
+    prev_status = msg.status
     msg.status = "cancelled"
     # Cancel scheduled entry if it exists
     sched_result = await db.execute(
@@ -179,6 +211,14 @@ async def cancel_broadcast(
     sched = sched_result.scalar_one_or_none()
     if sched:
         sched.status = "cancelled"
+    await log_request_action(
+        db, request, admin,
+        action="broadcast.cancel",
+        resource_type="broadcast",
+        resource_id=str(message_id),
+        detail=f"Cancelled broadcast #{message_id}",
+        metadata={"title": msg.title, "previous_status": prev_status},
+    )
     await db.commit()
 
 
@@ -187,6 +227,7 @@ async def cancel_broadcast(
 @router.get("/templates", response_model=list[TemplateOut])
 async def list_templates(
     category: Optional[str] = Query(None),
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[TemplateOut]:
     templates = await template_engine.list_templates(db, category=category)
@@ -196,6 +237,8 @@ async def list_templates(
 @router.post("/templates", response_model=TemplateOut, status_code=201)
 async def create_template(
     payload: TemplateCreate,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> TemplateOut:
     tpl = await template_engine.create_template(
@@ -206,6 +249,14 @@ async def create_template(
         variables=payload.variables,
         parse_mode=payload.parse_mode,
     )
+    await log_request_action(
+        db, request, admin,
+        action="broadcast.template.create",
+        resource_type="broadcast_template",
+        resource_id=str(tpl.id),
+        detail=f"Created template {payload.name}",
+        metadata={"category": payload.category},
+    )
     await db.commit()
     await db.refresh(tpl)
     return TemplateOut.model_validate(tpl)
@@ -215,6 +266,8 @@ async def create_template(
 async def update_template(
     template_id: int,
     payload: TemplateUpdate,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> TemplateOut:
     tpl = await template_engine.update_template(
@@ -222,6 +275,14 @@ async def update_template(
     )
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
+    await log_request_action(
+        db, request, admin,
+        action="broadcast.template.update",
+        resource_type="broadcast_template",
+        resource_id=str(template_id),
+        detail=f"Updated template {tpl.name}",
+        metadata=payload.model_dump(exclude_unset=True),
+    )
     await db.commit()
     await db.refresh(tpl)
     return TemplateOut.model_validate(tpl)
@@ -230,17 +291,27 @@ async def update_template(
 @router.delete("/templates/{template_id}", status_code=204)
 async def delete_template(
     template_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     ok = await template_engine.delete_template(db, template_id)
     if not ok:
         raise HTTPException(404, detail="Template not found")
+    await log_request_action(
+        db, request, admin,
+        action="broadcast.template.delete",
+        resource_type="broadcast_template",
+        resource_id=str(template_id),
+        detail=f"Deleted template #{template_id}",
+    )
     await db.commit()
 
 
 @router.post("/templates/render", response_model=TemplateRenderResponse)
 async def render_template_preview(
     payload: TemplateRenderRequest,
+    _admin: User = Depends(require_admin),
 ) -> TemplateRenderResponse:
     """Preview a template with provided variables (no DB write)."""
     rendered = template_engine.render(payload.content, payload.variables)
@@ -252,6 +323,8 @@ async def render_template_preview(
 @signal_router.post("/broadcast", response_model=SignalBroadcastResponse, status_code=202)
 async def trigger_signal_broadcast(
     payload: SignalBroadcastRequest,
+    request: Request,
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> SignalBroadcastResponse:
     """Manually trigger a signal broadcast (for testing or admin override)."""
@@ -274,6 +347,14 @@ async def trigger_signal_broadcast(
         )
 
     dedup_key = f"signal:{payload.symbol}:{payload.signal_type}:{payload.strategy}:{payload.timeframe}"
+    await log_request_action(
+        db, request, admin,
+        action="broadcast.signal",
+        resource_type="signal",
+        resource_id=str(message.id),
+        detail=f"Signal broadcast {payload.signal_type} {payload.symbol}",
+        metadata=payload.model_dump(),
+    )
     await db.commit()
     await broadcast_service.enqueue_committed_message(message, dedup_key=dedup_key)
     return SignalBroadcastResponse(ok=True, message_id=message.id, status=message.status)

@@ -9,6 +9,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RuntimeError)
+    async def runtime_error_handler(_request: Request, exc: RuntimeError) -> JSONResponse:
+        if "DATABASE_URL" in str(exc):
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Database not configured. Set DATABASE_URL to enable this feature."},
+            )
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
+
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
         detail = exc.detail

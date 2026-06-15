@@ -1,4 +1,4 @@
-"""Discovery orchestration — in-memory cache only (no database writes)."""
+"""Discovery orchestration — in-memory cache with optional Supabase persistence."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.core.config import settings
 from app.discovery.cache.discovery_cache import (
     get_cached_discovery,
     get_volume_change_pct,
@@ -21,6 +22,7 @@ from app.discovery.providers.gecko_new_pools_provider import GeckoNewPoolsProvid
 from app.discovery.providers.gecko_trending_provider import GeckoTrendingProvider
 from app.discovery.scoring.growth_scorer import dedupe_tokens, is_surging_candidate, score_token
 from app.discovery.types import DiscoveryResult, DiscoveryToken
+from app.discovery.utils import filter_tokens_by_chain
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,7 @@ class DiscoveryService:
         limit: int = DEFAULT_LIMIT,
     ) -> DiscoveryResult:
         if chain:
-            raw_tokens = [t for t in raw_tokens if t.chain == chain.lower() or t.source_type == "cex"]
+            raw_tokens = filter_tokens_by_chain(raw_tokens, chain)
 
         deduped = dedupe_tokens(raw_tokens)
         scored = await self._score_batch(deduped)
@@ -117,8 +119,7 @@ class DiscoveryService:
     ) -> DiscoveryResult:
         items = list(cached.items)
         if chain:
-            chain_lower = chain.lower()
-            items = [t for t in items if t.chain == chain_lower or t.source_type == "cex"]
+            items = filter_tokens_by_chain(items, chain)
         if min_score > 0:
             items = [t for t in items if t.growth_score >= min_score]
         return DiscoveryResult(
@@ -202,8 +203,7 @@ class DiscoveryService:
 
         deduped = dedupe_tokens(all_tokens)
         if chain:
-            chain_lower = chain.lower()
-            deduped = [t for t in deduped if t.chain == chain_lower or t.source_type == "cex"]
+            deduped = filter_tokens_by_chain(deduped, chain)
 
         scored: list[DiscoveryToken] = []
         for token in deduped:
@@ -263,7 +263,10 @@ class DiscoveryService:
     async def run_full_scan(self) -> None:
         """Background job: refresh all discovery categories sequentially."""
         t0 = time.monotonic()
-        logger.info("Discovery scan starting (in-memory cache only)…")
+        logger.info(
+            "Discovery scan starting (persistence=%s)…",
+            settings.ENABLE_DISCOVERY_PERSISTENCE,
+        )
 
         try:
             await self._cex.fetch(limit=10)

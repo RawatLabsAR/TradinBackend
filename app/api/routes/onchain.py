@@ -11,17 +11,20 @@ from typing import Literal, Optional
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.auth import require_admin
 from app.db.database import get_db
+from app.models.user import User
 from app.onchain.services.onchain_service import onchain_service
 from app.onchain.services.live_analysis_service import live_analysis_service
-from app.onchain.tracked_tokens import find_tracked_token, require_tracked_token
+from app.onchain.tracked_tokens import TRACKED_TOKENS, find_tracked_token, require_tracked_token
 from app.onchain.types import SUPPORTED_CHAINS, validate_token_address
 from app.onchain.utils.time_range import parse_date_param
 from app.onchain.pipelines.etl_pipeline import run_full_etl
+from app.services.activity_service import log_request_action
 from app.schemas.onchain import (
     HolderSnapshotSchema,
     LiquidityEventSchema,
@@ -46,13 +49,19 @@ from app.schemas.onchain import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/onchain", tags=["onchain"])
 
+_SUPPORTED_CHAIN_LIST = ", ".join(sorted(c.value for c in SUPPORTED_CHAINS))
+
+
+def _chain_query(default: str = "ethereum"):
+    return Query(default, description=f"Blockchain network ({_SUPPORTED_CHAIN_LIST})")
+
 
 def _validate_chain(chain: str) -> str:
     chain = chain.lower()
     if chain not in {c.value for c in SUPPORTED_CHAINS}:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported chain '{chain}'. Supported: ethereum, base, solana",
+            detail=f"Unsupported chain '{chain}'. Supported: {_SUPPORTED_CHAIN_LIST}",
         )
     return chain
 
@@ -93,10 +102,27 @@ def _query_hours(
     return hours if hours is not None else default
 
 
+@router.get("/tracked-tokens")
+async def list_tracked_tokens():
+    """Curated tokens for on-chain DB-backed endpoints (matches ONCHAIN_TRACKED_TOKENS env)."""
+    return {
+        "items": [
+            {
+                "id": t.get("id", t["token_address"][:8]),
+                "name": t.get("name", ""),
+                "symbol": t.get("symbol", ""),
+                "chain": t["chain"],
+                "address": t["token_address"],
+            }
+            for t in TRACKED_TOKENS
+        ]
+    }
+
+
 @router.get("/analyze/{address}", response_model=OnchainAnalysisSchema)
 async def analyze_token_live(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     hours: Optional[int] = Query(None, ge=1, le=8760),
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
@@ -146,7 +172,7 @@ async def analyze_token_live(
 @router.get("/token/{address}", response_model=TokenOverviewSchema)
 async def get_token_overview(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     hours: Optional[int] = Query(None, ge=1, le=8760),
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD or ISO datetime"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD or ISO datetime"),
@@ -183,7 +209,7 @@ async def get_token_overview(
 @router.get("/trades/{address}", response_model=PaginatedTradesResponse)
 async def get_trades(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     side: Optional[Literal["BUY", "SELL"]] = Query(None),
@@ -215,7 +241,7 @@ async def get_trades(
 @router.get("/holders/{address}", response_model=list[HolderSnapshotSchema])
 async def get_holders(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     limit: int = Query(30, ge=1, le=100),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
@@ -234,7 +260,7 @@ async def get_holders(
 @router.get("/whales/{address}", response_model=PaginatedWhalesResponse)
 async def get_whales(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     hours: Optional[int] = Query(None, ge=1, le=8760),
@@ -262,7 +288,7 @@ async def get_whales(
 @router.get("/liquidity/{address}", response_model=list[LiquidityEventSchema])
 async def get_liquidity(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     hours: Optional[int] = Query(None, ge=1, le=8760),
     limit: int = Query(100, ge=1, le=500),
     start_date: Optional[str] = Query(None),
@@ -284,7 +310,7 @@ async def get_liquidity(
 @router.get("/smart-money/{address}", response_model=list[SmartMoneyWalletSchema])
 async def get_smart_money(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     min_score: Optional[float] = Query(None, ge=0, le=100),
     limit: int = Query(50, ge=1, le=200),
     start_date: Optional[str] = Query(None),
@@ -304,7 +330,7 @@ async def get_smart_money(
 @router.get("/heatmap/{address}", response_model=TradeHeatmapSchema)
 async def get_trade_heatmap(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     hours: Optional[int] = Query(None, ge=1, le=8760),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
@@ -325,7 +351,7 @@ async def get_trade_heatmap(
 @router.get("/ohlcv/{address}", response_model=OhlcvResponseSchema)
 async def get_ohlcv(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     hours: Optional[int] = Query(None, ge=1, le=8760),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
@@ -348,7 +374,7 @@ async def get_ohlcv(
 @router.get("/metrics/{address}", response_model=list[TokenMetricsSchema])
 async def get_metrics(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     limit: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
@@ -361,7 +387,7 @@ async def get_metrics(
 @router.get("/wallet/{wallet}", response_model=WalletStatSchema)
 async def get_wallet_stats(
     wallet: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    chain: str = _chain_query("ethereum"),
     db: AsyncSession = Depends(get_db),
 ):
     chain = _validate_chain(chain)
@@ -374,9 +400,11 @@ async def get_wallet_stats(
 @router.post("/sync/{address}", response_model=OnchainSyncResponse)
 async def sync_token_data(
     address: str,
-    chain: Literal["ethereum", "base", "solana"] = Query("ethereum"),
+    request: Request,
+    chain: str = _chain_query("ethereum"),
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> OnchainSyncResponse:
     """
@@ -394,6 +422,14 @@ async def sync_token_data(
             db, chain, token_address,
             start_date=since,
             end_date=until,
+        )
+        await log_request_action(
+            db, request, admin,
+            action="onchain.sync",
+            resource_type="token",
+            resource_id=f"{chain}:{token_address}",
+            detail=f"Synced on-chain data for {chain}/{token_address[:10]}…",
+            metadata={"start_date": start_date, "end_date": end_date, **result},
         )
         await db.commit()
         return OnchainSyncResponse(

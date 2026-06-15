@@ -1,0 +1,40 @@
+# Render Cron Job — daily whale scanner
+# Deploy as a separate Cron Job service (not the web API).
+# Dashboard: New → Cron Job → connect repo → use settings below.
+
+services:
+  - type: cron
+    name: tradin-whale-scanner
+    runtime: python
+    rootDir: TradinBackend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.whale_scanner
+    # 10:00 PM IST (UTC+5:30) — adjust for your timezone
+    schedule: "30 16 * * *"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WHALE_CHANNEL_ID
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: WHALE_THRESHOLD_USD
+        value: "50000"
+      - key: MAX_AGE_DAYS
+        value: "30"
+      - key: MAX_TOKENS_PER_RUN
+        value: "200"
+      - key: MIN_LIQUIDITY_USD
+        value: "5000"
+      - key: MIN_VOLUME_24H
+        value: "10000"
+      - key: WHALE_LOOKBACK_HOURS
+        value: "24"
+      - key: MAX_TELEGRAM_ALERTS
+        value: "15"
+      - key: SCAN_CONCURRENCY
+        value: "3"
+      - key: DUNE_API_KEY
+        sync: false

@@ -435,7 +435,9 @@ async def get_product(product_id: str) -> dict:
             ticker = ticker_data[0]
         elif isinstance(ticker_data, dict):
             ticker = ticker_data
-        return _norm_derivative_ticker(ticker if ticker else {"contract": contract}, "SWAP")
+        if not ticker or not float(ticker.get("last") or 0):
+            raise ValueError(f"Product not found: {product_id}")
+        return _norm_derivative_ticker(ticker, "SWAP")
 
     if market == "delivery":
         ticker_data = await _get("/delivery/usdt/tickers", params={"contract": contract})
@@ -444,7 +446,9 @@ async def get_product(product_id: str) -> dict:
             ticker = ticker_data[0]
         elif isinstance(ticker_data, dict):
             ticker = ticker_data
-        return _norm_derivative_ticker(ticker if ticker else {"contract": contract}, "FUTURES")
+        if not ticker or not float(ticker.get("last") or 0):
+            raise ValueError(f"Product not found: {product_id}")
+        return _norm_derivative_ticker(ticker, "FUTURES")
 
     ticker_data, pair_info = await asyncio.gather(
         _get("/spot/tickers", params={"currency_pair": contract}),
@@ -460,8 +464,15 @@ async def get_product(product_id: str) -> dict:
 
     product = _norm_ticker(ticker if ticker else {"currency_pair": contract})
 
-    if isinstance(pair_info, dict):
+    if isinstance(pair_info, dict) and pair_info.get("id"):
         product = _enrich_with_pair_info(product, pair_info)
+    elif isinstance(pair_info, Exception) or not isinstance(pair_info, dict):
+        # currency_pairs 404 — market does not exist
+        raise ValueError(f"Product not found: {product_id}")
+
+    price = float(product.get("price") or product.get("mid_market_price") or 0)
+    if price <= 0:
+        raise ValueError(f"Product not found: {product_id}")
 
     return product
 

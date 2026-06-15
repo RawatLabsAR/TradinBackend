@@ -45,6 +45,7 @@ class DiscoveryResponse(BaseModel):
     sources_used: list[str] = Field(default_factory=list)
     scanned_at: str = ""
     cached: bool = False
+    empty_reason: Optional[str] = None
 
 
 class DiscoveryOverviewResponse(BaseModel):

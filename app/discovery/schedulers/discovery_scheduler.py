@@ -1,4 +1,4 @@
-"""Discovery background scan scheduler — in-memory only, no database."""
+"""Discovery background scan scheduler — optional Supabase persistence."""
 
 from __future__ import annotations
 
@@ -28,4 +28,9 @@ def attach_discovery_scheduler(scheduler) -> None:
         id="discovery_scan",
         replace_existing=True,
     )
-    logger.info("Discovery scheduler attached (daily at %02d:%02d UTC, in-memory cache)", hour, minute)
+    logger.info(
+        "Discovery scheduler attached (daily at %02d:%02d UTC, persistence=%s)",
+        hour,
+        minute,
+        settings.ENABLE_DISCOVERY_PERSISTENCE,
+    )

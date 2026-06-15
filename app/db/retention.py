@@ -9,10 +9,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.activity_log import ActivityLog
 from app.models.ai_summary import AISummary
 from app.models.broadcast import BroadcastLog, SignalBroadcastHistory
 from app.models.market_insight import MarketInsight
 from app.models.news_article import NewsArticle
+from app.models.paper_trade import PaperTrade
 from app.models.script import BacktestResult, SignalHistory, StrategyRun
 from app.onchain.models.entities import (
     HolderSnapshot,
@@ -143,6 +145,31 @@ async def cleanup_strategy_runs(db: AsyncSession) -> int:
     )
 
 
+async def cleanup_activity_logs(db: AsyncSession) -> int:
+    cutoff = _utcnow() - timedelta(days=settings.RETENTION_ACTIVITY_DAYS)
+    return await _delete_count(
+        db, delete(ActivityLog).where(ActivityLog.created_at < cutoff)
+    )
+
+
+async def cleanup_closed_paper_trades(db: AsyncSession) -> int:
+    cutoff = _utcnow() - timedelta(days=settings.RETENTION_PAPER_TRADES_DAYS)
+    return await _delete_count(
+        db,
+        delete(PaperTrade).where(
+            PaperTrade.closed_at.isnot(None),
+            PaperTrade.closed_at < cutoff,
+        ),
+    )
+
+
+async def cleanup_discovery_snapshots(db: AsyncSession) -> int:
+    from app.discovery.cache.discovery_store import delete_stale_snapshots
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.RETENTION_DISCOVERY_DAYS)
+    return await delete_stale_snapshots(db, cutoff)
+
+
 async def run_retention_cleanup(db: AsyncSession) -> dict[str, int]:
     """Run all retention jobs. Returns per-table deletion counts."""
     stats: dict[str, int] = {}
@@ -165,6 +192,10 @@ async def run_retention_cleanup(db: AsyncSession) -> dict[str, int]:
 
     stats["broadcast_logs"] = await cleanup_broadcast_logs(db)
     stats["strategy_runs"] = await cleanup_strategy_runs(db)
+    stats["activity_logs"] = await cleanup_activity_logs(db)
+    stats["paper_trades_closed"] = await cleanup_closed_paper_trades(db)
+    if settings.ENABLE_DISCOVERY_PERSISTENCE:
+        stats["discovery_snapshots"] = await cleanup_discovery_snapshots(db)
 
     total = sum(stats.values())
     logger.info(

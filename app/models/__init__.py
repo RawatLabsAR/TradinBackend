@@ -18,6 +18,13 @@ from app.models.broadcast import (
     SignalBroadcastHistory,
 )
 from app.models.price_alert import PriceAlert
+from app.models.paper_trade import PaperTrade
+from app.models.whale_scan import WhaleScanCandidate, WhaleScanNotification, WhaleScanRun
+from app.models.watchlist_item import WatchlistItem
+from app.models.portfolio_holding import PortfolioHolding
+from app.models.discovery_snapshot import DiscoverySnapshot
+from app.models.user import User
+from app.models.activity_log import ActivityLog
 from app.onchain.models.entities import (
     OnchainTrade,
     OnchainOhlcv,
@@ -51,6 +58,15 @@ __all__ = [
     "ScheduledBroadcast",
     "SignalBroadcastHistory",
     "PriceAlert",
+    "User",
+    "ActivityLog",
+    "PaperTrade",
+    "WhaleScanCandidate",
+    "WhaleScanRun",
+    "WhaleScanNotification",
+    "WatchlistItem",
+    "PortfolioHolding",
+    "DiscoverySnapshot",
     "OnchainTrade",
     "OnchainOhlcv",
     "WalletStat",

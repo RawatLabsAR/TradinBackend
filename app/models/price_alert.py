@@ -16,6 +16,7 @@ class PriceAlert(Base):
     __tablename__ = "price_alerts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     product_id = Column(String(32), nullable=False, index=True)
     target_price = Column(Float, nullable=False)
     direction = Column(String(8), nullable=False, default="above")

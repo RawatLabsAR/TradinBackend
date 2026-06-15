@@ -1,12 +1,18 @@
-"""Crypto discovery REST endpoints — reads/writes in-memory cache only."""
+"""Crypto discovery REST endpoints — in-memory cache with optional Postgres persistence."""
 
 from __future__ import annotations
 
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from app.core.auth import require_admin
+from app.db.database import get_db
+from app.models.user import User
+from app.services.activity_service import log_request_action
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.discovery.cache.discovery_cache import get_cached_discovery
 from app.discovery.services.discovery_service import discovery_service
 from app.discovery.types import DiscoveryToken
 from app.schemas.common import StatusResponse
@@ -23,6 +29,11 @@ def _to_schema(token: DiscoveryToken) -> DiscoveryTokenSchema:
 
 
 def _to_response(result) -> DiscoveryResponse:
+    empty_reason = None
+    if not result.scanned_at and not result.items:
+        empty_reason = "not_scanned_yet"
+    elif result.scanned_at and not result.items:
+        empty_reason = "no_matches"
     return DiscoveryResponse(
         category=result.category,
         total=len(result.items),
@@ -30,6 +41,7 @@ def _to_response(result) -> DiscoveryResponse:
         sources_used=result.sources_used,
         scanned_at=result.scanned_at,
         cached=result.cached,
+        empty_reason=empty_reason,
     )
 
 
@@ -106,19 +118,29 @@ async def discover_trending(
 
 
 @router.post("/scan", response_model=StatusResponse)
-async def trigger_discovery_scan() -> StatusResponse:
-    """Manually run a full discovery scan (in-memory cache only)."""
+async def trigger_discovery_scan(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> StatusResponse:
+    """Manually run a full discovery scan (persisted when ENABLE_DISCOVERY_PERSISTENCE=true)."""
     try:
         await discovery_service.run_full_scan()
+        await log_request_action(
+            db, request, admin,
+            action="discovery.scan",
+            resource_type="discovery",
+            detail="Manual full discovery scan completed",
+        )
+        await db.commit()
+        return StatusResponse(status="ok")
     except Exception as exc:
         logger.exception("Discovery scan endpoint error: %s", exc)
-    return StatusResponse(status="ok")
+        raise HTTPException(status_code=500, detail=f"Discovery scan failed: {exc}") from exc
 
 
 @router.get("/overview", response_model=DiscoveryOverviewResponse)
 async def discover_overview():
-    from app.discovery.cache.discovery_cache import get_cached_discovery
-
     categories = ["new_dex", "new_cex", "surging", "trending"]
     counts: dict[str, int] = {}
     last_scanned = ""

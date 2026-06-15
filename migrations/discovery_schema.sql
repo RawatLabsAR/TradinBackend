@@ -1,5 +1,3 @@
--- Discovery no longer uses the database (in-memory cache only).
--- Run once on Supabase if these tables were created by an earlier version:
-
-DROP TABLE IF EXISTS discovery_snapshots;
-DROP TABLE IF EXISTS cex_listing_records;
+-- DEPRECATED — do not run this migration.
+-- Discovery results are persisted in `discovery_snapshots` (see supabase/migrations/001_user_data_and_discovery.sql).
+-- This file previously dropped discovery tables when discovery was in-memory only.

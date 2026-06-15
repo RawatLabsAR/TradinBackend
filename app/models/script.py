@@ -38,6 +38,7 @@ class Script(Base):
     language    = Column(String(32), nullable=False, default="pine_v1")
     is_active   = Column(Boolean, nullable=False, default=True)
     is_public   = Column(Boolean, nullable=False, default=False)
+    user_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Metadata extracted at validation time
     strategy_name     = Column(String(255), nullable=True)
