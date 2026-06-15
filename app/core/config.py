@@ -19,10 +19,29 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    # Supabase / PostgreSQL — paste the connection string from
-    # Supabase Dashboard → Project Settings → Database → Connection string (URI)
-    # Use the "Transaction pooler" URI for FastAPI (port 6543).
+    # PostgreSQL — use a transaction-pooler URI when hosted on Supabase (port 6543).
     DATABASE_URL: str = ""
+    DB_POOL_SIZE: int = 3
+    DB_MAX_OVERFLOW: int = 5
+
+    # ── Persistence feature flags ─────────────────────────────────────────────
+    ENABLE_ONCHAIN_PERSISTENCE: bool = True
+    ENABLE_TOKEN_SEARCH_DB: bool = True
+    ENABLE_NEWS_PERSISTENCE: bool = True
+    ENABLE_AI_PERSISTENCE: bool = True
+    ENABLE_SEARCH_HISTORY: bool = True
+
+    # ── Retention (days) ──────────────────────────────────────────────────────
+    RETENTION_NEWS_DAYS: int = 7
+    RETENTION_AI_SUMMARIES_DAYS: int = 30
+    RETENTION_ONCHAIN_TRADES_DAYS: int = 14
+    RETENTION_ONCHAIN_OHLCV_DAYS: int = 90
+    RETENTION_ONCHAIN_SNAPSHOTS_DAYS: int = 30
+    RETENTION_ONCHAIN_EVENTS_DAYS: int = 30
+    RETENTION_ONCHAIN_METRICS_DAYS: int = 90
+    RETENTION_SEARCH_HISTORY_DAYS: int = 14
+    RETENTION_BROADCAST_LOGS_DAYS: int = 30
+    RETENTION_STRATEGY_RUNS_DAYS: int = 60
 
     # ── Data provider ──────────────────────────────────────────────────────────
     # Accepted values: "coinbase" | "gate"
@@ -39,6 +58,10 @@ class Settings(BaseSettings):
     GATE_DELIVERY_WS_URL: str = "wss://fx-ws.gateio.ws/v4/ws/delivery/usdt"
 
     FRONTEND_URL: str = "http://localhost:5173"
+    # Comma-separated extra origins (e.g. production + preview Vercel URLs)
+    ALLOWED_ORIGINS: str = ""
+    # Regex for dynamic preview deployments; set empty to disable
+    CORS_ORIGIN_REGEX: str = r"https://.*\.vercel\.app"
 
     CACHE_TTL_PRODUCTS: int = 60
     CACHE_TTL_CANDLES_SHORT: int = 30
@@ -70,7 +93,7 @@ class Settings(BaseSettings):
 
     # ── On-chain analytics ────────────────────────────────────────────────────
     DUNE_API_KEY: str = ""
-    ONCHAIN_SYNC_INTERVAL_MINUTES: int = 15
+    ONCHAIN_SYNC_INTERVAL_MINUTES: int = 30
     WHALE_THRESHOLD_USD: float = 50_000.0
     SMART_MONEY_MIN_SCORE: float = 80.0
     # JSON array or chain:address;chain:address format
@@ -80,6 +103,11 @@ class Settings(BaseSettings):
     DEXSCREENER_API_URL: str = "https://api.dexscreener.com"
     COINGECKO_API_KEY: str = ""
     TOKEN_SEARCH_CACHE_MINUTES: int = 10
+
+    # ── Crypto discovery ──────────────────────────────────────────────────────
+    DISCOVERY_SCAN_HOUR: int = 6  # UTC — daily automatic scan
+    DISCOVERY_SCAN_MINUTE: int = 0
+    DISCOVERY_CACHE_TTL_HOURS: int = 48
 
     @property
     def database_url(self) -> str | None:
@@ -100,6 +128,17 @@ class Settings(BaseSettings):
     @property
     def default_product_list(self) -> List[str]:
         return [p.strip() for p in self.DEFAULT_PRODUCTS.split(",") if p.strip()]
+
+    @property
+    def cors_origins(self) -> List[str]:
+        origins = {"http://localhost:5173", "http://localhost:3000"}
+        if self.FRONTEND_URL.strip():
+            origins.add(self.FRONTEND_URL.strip().rstrip("/"))
+        for origin in self.ALLOWED_ORIGINS.split(","):
+            normalized = origin.strip().rstrip("/")
+            if normalized:
+                origins.add(normalized)
+        return sorted(origins)
 
 
 settings = Settings()

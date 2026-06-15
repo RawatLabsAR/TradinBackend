@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.db.database import AsyncSessionLocal, create_tables, dispose_engine
+from app.db.retention_scheduler import attach_retention_scheduler
 from app.providers.registry import build_ws_client, close_market_session
 from app.websocket.manager import ws_manager
 from app.websocket.registry import set_active_ws_client
@@ -18,6 +19,7 @@ from app.api.routes import telegram as telegram_router
 from app.api.routes import alerts as alerts_router
 from app.api.routes import onchain as onchain_router
 from app.api.routes import token_search as token_search_router
+from app.api.routes import discovery as discovery_router
 from app.services.news.news_scheduler import create_scheduler
 from app.services.alert_service import check_alerts_for_ticker
 from app.broadcast.services.broadcast_service import broadcast_service
@@ -25,6 +27,7 @@ from app.broadcast.schedulers.broadcast_scheduler import attach_broadcast_schedu
 from app.broadcast.templates.template_engine import template_engine
 from app.onchain.schedulers.onchain_scheduler import attach_onchain_scheduler
 from app.token_search.schedulers.search_scheduler import attach_token_search_scheduler
+from app.discovery.schedulers.discovery_scheduler import attach_discovery_scheduler
 from app.onchain.collectors.base import close_session as close_onchain_session
 from app.integrations.telegram.telegram_service import get_telegram_service, init_telegram_service
 import app.models  # ensure all models are registered with Base before create_tables()
@@ -72,10 +75,15 @@ async def lifespan(app: FastAPI):
     )
 
     scheduler = create_scheduler()
-    attach_onchain_scheduler(scheduler)
+    if settings.ENABLE_ONCHAIN_PERSISTENCE:
+        attach_onchain_scheduler(scheduler)
+    else:
+        logger.info("On-chain persistence disabled — ETL scheduler skipped")
     attach_token_search_scheduler(scheduler)
+    attach_discovery_scheduler(scheduler)
+    attach_retention_scheduler(scheduler)
     scheduler.start()
-    logger.info("News + AI + On-chain + Token search scheduler started")
+    logger.info("Background schedulers started")
 
     # ── Telegram + Broadcast ─────────────────────────────────────────────────
     if settings.TELEGRAM_BOT_TOKEN:
@@ -138,13 +146,16 @@ app = FastAPI(
 
 register_exception_handlers(app)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_kwargs: dict = {
+    "allow_origins": settings.cors_origins,
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if settings.CORS_ORIGIN_REGEX.strip():
+    _cors_kwargs["allow_origin_regex"] = settings.CORS_ORIGIN_REGEX.strip()
+
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 # REST routers — all mounted under /api; ws stays at /ws
 API_PREFIX = "/api"
@@ -160,6 +171,7 @@ app.include_router(telegram_router.router, prefix=API_PREFIX)
 app.include_router(alerts_router.router, prefix=API_PREFIX)
 app.include_router(onchain_router.router, prefix=API_PREFIX)
 app.include_router(token_search_router.router, prefix=API_PREFIX)
+app.include_router(discovery_router.router, prefix=API_PREFIX)
 
 # WebSocket router (no /api prefix — client connects directly to /ws)
 app.include_router(ws_router.router)

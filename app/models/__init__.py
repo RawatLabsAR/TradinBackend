@@ -8,7 +8,6 @@ from app.models.script import (
     StrategyRun,
     SignalHistory,
     BacktestResult,
-    IndicatorCache,
 )
 from app.models.broadcast import (
     TelegramChannel,
@@ -32,9 +31,6 @@ from app.onchain.models.entities import (
 )
 from app.token_search.models.entities import (
     TokenRegistry,
-    TokenSearchCache,
-    TokenMetadata,
-    TrendingToken,
     SearchHistory,
 )
 
@@ -48,7 +44,6 @@ __all__ = [
     "StrategyRun",
     "SignalHistory",
     "BacktestResult",
-    "IndicatorCache",
     "TelegramChannel",
     "BroadcastTemplate",
     "BroadcastMessage",
@@ -66,8 +61,5 @@ __all__ = [
     "TokenMetric",
     "SyncCheckpoint",
     "TokenRegistry",
-    "TokenSearchCache",
-    "TokenMetadata",
-    "TrendingToken",
     "SearchHistory",
 ]

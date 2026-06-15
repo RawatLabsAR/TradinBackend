@@ -14,6 +14,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.database import get_db
 from app.onchain.services.onchain_service import onchain_service
 from app.onchain.services.live_analysis_service import live_analysis_service
@@ -382,6 +383,8 @@ async def sync_token_data(
     Trigger on-chain ETL sync for a token (GeckoTerminal OHLCV + live trades).
     Pass start_date/end_date to backfill a specific range (max 180 days).
     """
+    if not settings.ENABLE_ONCHAIN_PERSISTENCE:
+        raise HTTPException(status_code=503, detail="On-chain persistence is disabled")
     chain = _validate_chain(chain)
     token_address = _normalize(chain, address)
     since, until = _parse_range(start_date, end_date)

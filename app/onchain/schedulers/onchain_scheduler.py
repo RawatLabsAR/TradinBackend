@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 async def onchain_sync_job() -> None:
     """Scheduled job: sync all tracked tokens."""
+    if not settings.ENABLE_ONCHAIN_PERSISTENCE:
+        return
+    if AsyncSessionLocal is None:
+        return
     tokens = get_tracked_tokens()
     if not tokens:
         logger.debug("Onchain sync: no tracked tokens configured")
@@ -49,7 +53,10 @@ async def onchain_sync_job() -> None:
 
 def attach_onchain_scheduler(scheduler) -> None:
     """Attach on-chain sync job to existing APScheduler."""
-    interval = getattr(settings, "ONCHAIN_SYNC_INTERVAL_MINUTES", 15)
+    if not settings.ENABLE_ONCHAIN_PERSISTENCE:
+        logger.info("On-chain persistence disabled — scheduler not attached")
+        return
+    interval = settings.ONCHAIN_SYNC_INTERVAL_MINUTES
     scheduler.add_job(
         onchain_sync_job,
         "interval",

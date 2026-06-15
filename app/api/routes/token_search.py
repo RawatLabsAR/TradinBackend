@@ -13,7 +13,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db
+from app.db.database import get_optional_db
 from app.onchain.tracked_tokens import find_tracked_token
 from app.schemas.common import StatusResponse
 from app.schemas.token_search import (
@@ -73,7 +73,7 @@ async def search_tokens(
     q: str = Query(..., min_length=1, max_length=64),
     chain: Optional[Literal["ethereum", "base", "solana", "bsc", "arbitrum", "polygon"]] = Query(None),
     limit: int = Query(20, ge=1, le=50),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ):
     query = _sanitize_query(q)
     result = await token_search_service.search(db, query, limit=limit, chain=chain)
@@ -91,7 +91,7 @@ async def search_tokens(
 async def get_trending(
     chain: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=50),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ):
     entries = await token_search_service.get_trending(db, limit=limit, chain=chain)
     return [TrendingTokenSchema.model_validate(e.model_dump()) for e in entries]
@@ -102,7 +102,7 @@ async def resolve_symbol(
     symbol: str,
     chain: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=30),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ):
     sym = _sanitize_query(symbol)
     result = await token_search_service.resolve_symbol(db, sym, chain=chain, limit=limit)
@@ -120,7 +120,7 @@ async def resolve_symbol(
 async def recent_searches(
     session_id: str = Query("anonymous"),
     limit: int = Query(10, ge=1, le=30),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ):
     items = await token_search_service.get_recent_searches(db, session_id, limit=limit)
     return [RecentSearchSchema.model_validate(i) for i in items]
@@ -131,7 +131,7 @@ async def get_token_detail(
     contract_address: str,
     chain: Literal["ethereum", "base", "solana", "bsc", "arbitrum", "polygon"] = Query(...),
     include_ai: bool = Query(True),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ):
     if len(contract_address) < 20:
         raise HTTPException(status_code=400, detail="Invalid contract address")
@@ -155,7 +155,7 @@ async def get_token_detail(
 @router.post("/record-search", response_model=StatusResponse)
 async def record_search(
     body: RecordSearchRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ) -> StatusResponse:
     selected = None
     if body.chain and body.contract_address:
@@ -177,7 +177,7 @@ async def record_search(
 @router.post("/broadcast", response_model=BroadcastTokenResponse)
 async def broadcast_token(
     body: BroadcastTokenRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ) -> BroadcastTokenResponse:
     token = await token_search_service.get_token_detail(db, body.chain, body.contract_address)
     if not token:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import desc, select, update
@@ -13,25 +13,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.token_search.cache.search_cache import (
+    get_cached_metadata,
     get_cached_search,
-    get_db_cached_search,
-    persist_search_cache,
+    set_cached_metadata,
     set_cached_search,
 )
-from app.token_search.models.entities import (
-    SearchHistory,
-    TokenMetadata,
-    TokenRegistry,
-    TrendingToken,
-)
+from app.token_search.models.entities import SearchHistory, TokenRegistry
 from app.token_search.providers.coingecko_provider import CoinGeckoProvider
 from app.token_search.providers.dexscreener_provider import DexScreenerProvider
-from app.token_search.ranking.rank_engine import rank_tokens
+from app.token_search.ranking.rank_engine import compute_rank_score, rank_tokens
 from app.token_search.types import NormalizedToken, TokenSearchResult, TrendingTokenEntry, normalize_contract
 
 logger = logging.getLogger(__name__)
 
 PROVIDER_TIMEOUT_SECONDS = 8.0
+
+
+def _db_enabled(db: AsyncSession | None) -> bool:
+    return db is not None and settings.ENABLE_TOKEN_SEARCH_DB
 
 
 def _get_providers():
@@ -58,7 +57,7 @@ async def _provider_search(provider, query: str, *, limit: int) -> list[Normaliz
 class TokenSearchService:
     async def search(
         self,
-        db: AsyncSession,
+        db: AsyncSession | None,
         query: str,
         *,
         limit: int = 20,
@@ -80,16 +79,6 @@ class TokenSearchService:
                     mem.total = len(mem.items)
                 return mem
 
-            db_cached = await get_db_cached_search(db, query)
-            if db_cached:
-                await set_cached_search(query, db_cached)
-                db_cached.took_ms = round((time.monotonic() - t0) * 1000, 2)
-                if chain:
-                    db_cached.items = [t for t in db_cached.items if t.chain == chain.lower()]
-                    db_cached.total = len(db_cached.items)
-                return db_cached
-
-        # Fan out to all providers concurrently (each capped by timeout)
         providers = _get_providers()
         results = await asyncio.gather(
             *[_provider_search(p, query, limit=limit * 2) for p in providers],
@@ -120,66 +109,40 @@ class TokenSearchService:
         )
 
         await set_cached_search(query, search_result)
-        try:
-            await persist_search_cache(db, query, search_result)
-            await self._upsert_registry(db, ranked)
-            await db.commit()
-        except Exception as exc:
-            logger.warning("Search cache persist failed: %s", exc)
-            await db.rollback()
+
+        if _db_enabled(db):
+            try:
+                await self._upsert_registry(db, ranked)
+                await db.commit()
+            except Exception as exc:
+                logger.warning("Registry upsert failed: %s", exc)
+                await db.rollback()
 
         return search_result
 
     async def resolve_symbol(
         self,
-        db: AsyncSession,
+        db: AsyncSession | None,
         symbol: str,
         *,
         chain: Optional[str] = None,
         limit: int = 10,
     ) -> TokenSearchResult:
-        """Resolve ambiguous symbol to ranked contract addresses."""
         return await self.search(db, symbol, limit=limit, chain=chain)
 
     async def get_token_detail(
         self,
-        db: AsyncSession,
+        db: AsyncSession | None,
         chain: str,
         contract_address: str,
     ) -> Optional[NormalizedToken]:
         chain = chain.lower()
         contract_address = normalize_contract(chain, contract_address)
 
-        # Check metadata cache
-        now = datetime.utcnow()
-        meta_row = await db.execute(
-            select(TokenMetadata).where(
-                TokenMetadata.chain == chain,
-                TokenMetadata.contract_address == contract_address,
-                TokenMetadata.expires_at > now,
-            ).order_by(desc(TokenMetadata.fetched_at)).limit(1)
-        )
-        meta = meta_row.scalar_one_or_none()
-        if meta:
-            reg = await self._get_registry(db, chain, contract_address)
-            return NormalizedToken(
-                token_name=reg.token_name if reg else "",
-                symbol=reg.symbol if reg else "",
-                chain=chain,
-                contract_address=contract_address,
-                logo_url=reg.logo_url if reg else "",
-                market_cap=meta.market_cap,
-                liquidity=meta.liquidity,
-                volume_24h=meta.volume_24h,
-                price_usd=meta.price_usd,
-                price_change_24h=meta.price_change_24h,
-                verified=meta.verified or (reg.verified if reg else False),
-                dex=meta.dex,
-                pair_address=meta.pair_address,
-                holder_count=meta.holder_count,
-            )
+        cached = await get_cached_metadata(chain, contract_address)
+        if cached:
+            return cached
 
-        # Fetch from providers
         token: Optional[NormalizedToken] = None
         for provider in _get_providers():
             try:
@@ -189,8 +152,7 @@ class TokenSearchService:
             except Exception as exc:
                 logger.debug("get_token %s failed: %s", provider.name, exc)
 
-        if not token:
-            # Try search by registry symbol
+        if not token and _db_enabled(db):
             reg = await self._get_registry(db, chain, contract_address)
             if reg:
                 token = NormalizedToken(
@@ -204,33 +166,44 @@ class TokenSearchService:
                 )
 
         if token:
-            await self._persist_metadata(db, token)
-            await self._upsert_registry(db, [token])
-            await db.commit()
+            await set_cached_metadata(token)
+            if _db_enabled(db):
+                try:
+                    await self._upsert_registry(db, [token])
+                    await db.commit()
+                except Exception as exc:
+                    logger.warning("Token registry upsert failed: %s", exc)
+                    await db.rollback()
 
         return token
 
     async def get_trending(
         self,
-        db: AsyncSession,
+        db: AsyncSession | None,
         *,
         limit: int = 20,
         chain: Optional[str] = None,
     ) -> list[TrendingTokenEntry]:
-        q = select(TrendingToken).order_by(desc(TrendingToken.trend_score)).limit(limit)
+        if not _db_enabled(db):
+            return []
+
+        reg_q = select(TokenRegistry).order_by(desc(TokenRegistry.search_count)).limit(limit)
         if chain:
-            q = q.where(TrendingToken.chain == chain.lower())
+            reg_q = reg_q.where(TokenRegistry.chain == chain.lower())
 
-        result = await db.execute(q)
-        rows = result.scalars().all()
-
-        if not rows:
-            # Fallback: top searched registry tokens
-            reg_q = select(TokenRegistry).order_by(desc(TokenRegistry.search_count)).limit(limit)
-            if chain:
-                reg_q = reg_q.where(TokenRegistry.chain == chain.lower())
-            reg_result = await db.execute(reg_q)
-            return [
+        result = await db.execute(reg_q)
+        entries: list[TrendingTokenEntry] = []
+        for r in result.scalars().all():
+            token = NormalizedToken(
+                token_name=r.token_name,
+                symbol=r.symbol,
+                chain=r.chain,
+                contract_address=r.contract_address,
+                logo_url=r.logo_url,
+                verified=r.verified,
+                dex=r.primary_dex,
+            )
+            entries.append(
                 TrendingTokenEntry(
                     token_name=r.token_name,
                     symbol=r.symbol,
@@ -238,38 +211,24 @@ class TokenSearchService:
                     contract_address=r.contract_address,
                     logo_url=r.logo_url,
                     search_count=r.search_count,
+                    trend_score=compute_rank_score(token, r.symbol or ""),
                     dex=r.primary_dex,
                     verified=r.verified,
                 )
-                for r in reg_result.scalars().all()
-            ]
-
-        return [
-            TrendingTokenEntry(
-                token_name=r.token_name,
-                symbol=r.symbol,
-                chain=r.chain,
-                contract_address=r.contract_address,
-                logo_url=r.logo_url,
-                volume_24h=r.volume_24h,
-                liquidity=r.liquidity,
-                market_cap=r.market_cap,
-                search_count=r.search_count,
-                trend_score=r.trend_score,
-                dex=r.dex,
-                verified=r.verified,
             )
-            for r in rows
-        ]
+        return entries
 
     async def record_search(
         self,
-        db: AsyncSession,
+        db: AsyncSession | None,
         *,
         session_id: str,
         query: str,
         selected: Optional[NormalizedToken] = None,
     ) -> None:
+        if not _db_enabled(db) or not settings.ENABLE_SEARCH_HISTORY:
+            return
+
         db.add(SearchHistory(
             session_id=session_id or "anonymous",
             query=query[:128],
@@ -291,11 +250,14 @@ class TokenSearchService:
 
     async def get_recent_searches(
         self,
-        db: AsyncSession,
+        db: AsyncSession | None,
         session_id: str,
         *,
         limit: int = 10,
     ) -> list[dict]:
+        if not _db_enabled(db) or not settings.ENABLE_SEARCH_HISTORY:
+            return []
+
         result = await db.execute(
             select(SearchHistory)
             .where(SearchHistory.session_id == session_id)
@@ -352,23 +314,6 @@ class TokenSearchService:
                     verified=token.verified,
                     primary_dex=token.dex,
                 ))
-
-    async def _persist_metadata(self, db: AsyncSession, token: NormalizedToken) -> None:
-        expires = datetime.utcnow() + timedelta(minutes=settings.TOKEN_SEARCH_CACHE_MINUTES * 2)
-        db.add(TokenMetadata(
-            chain=token.chain,
-            contract_address=token.contract_address,
-            market_cap=token.market_cap,
-            liquidity=token.liquidity,
-            volume_24h=token.volume_24h,
-            price_usd=token.price_usd,
-            price_change_24h=token.price_change_24h,
-            holder_count=token.holder_count,
-            dex=token.dex,
-            pair_address=token.pair_address,
-            verified=token.verified,
-            expires_at=expires,
-        ))
 
 
 token_search_service = TokenSearchService()

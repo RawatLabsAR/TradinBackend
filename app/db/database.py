@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -8,10 +8,9 @@ from app.core.config import settings
 
 def _build_connect_args() -> dict:
     args: dict = {}
-    # Supabase Supavisor (transaction pooler) does not support prepared statements.
+    # Transaction poolers (e.g. Supabase Supavisor on :6543) disable prepared statements.
     if ":6543" in settings.DATABASE_URL:
         args["statement_cache_size"] = 0
-    # Supabase requires SSL for all Postgres connections.
     if "supabase.co" in settings.DATABASE_URL:
         args["ssl"] = "require"
     return args
@@ -27,8 +26,8 @@ def _build_engine() -> Optional[AsyncEngine]:
         echo=settings.DEBUG,
         pool_pre_ping=True,
         pool_recycle=1800,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
         connect_args=_build_connect_args(),
     )
 
@@ -52,12 +51,27 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     if AsyncSessionLocal is None:
         raise RuntimeError(
-            "DATABASE_URL is not configured. "
-            "Set it in backend/.env from Supabase Dashboard → Database."
+            "DATABASE_URL is not configured. Set it in .env to enable persistence."
         )
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def get_optional_db() -> AsyncGenerator[AsyncSession | None, None]:
+    """Yield a DB session when configured, otherwise None (in-memory-only mode)."""
+    if AsyncSessionLocal is None:
+        yield None
+        return
     async with AsyncSessionLocal() as session:
         try:
             yield session

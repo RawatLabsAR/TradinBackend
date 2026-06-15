@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
-from app.db.database import get_db
+from app.db.database import get_optional_db
 from app.models.ai_summary import AISummary
 from app.models.coin_sentiment import CoinSentiment
 from app.schemas.ai_insight import (
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 @router.get("/insights/{symbol}", response_model=AIInsightResponse)
 async def get_full_insights(
     symbol: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ) -> AIInsightResponse:
     """
     Return the full AI market intelligence for a symbol.
@@ -46,7 +46,7 @@ async def get_full_insights(
 @router.get("/summary/{symbol}", response_model=AISummaryOnlyResponse)
 async def get_ai_summary(
     symbol: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ) -> AISummaryOnlyResponse:
     """Return just the AI-generated summary text for a symbol."""
     result = await insight_service.get_insights(db, symbol.upper())
@@ -61,7 +61,7 @@ async def get_ai_summary(
 @router.get("/sentiment/{symbol}", response_model=CoinSentimentSchema)
 async def get_sentiment(
     symbol: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ) -> CoinSentimentSchema:
     """
     Return quick sentiment snapshot.
@@ -69,13 +69,13 @@ async def get_sentiment(
     falls back to running full insight generation.
     """
     symbol = symbol.upper()
-    result = await db.execute(
-        select(CoinSentiment).where(CoinSentiment.symbol == symbol)
-    )
-    coin_sent = result.scalar_one_or_none()
-
-    if coin_sent:
-        return CoinSentimentSchema.model_validate(coin_sent)
+    if db is not None:
+        result = await db.execute(
+            select(CoinSentiment).where(CoinSentiment.symbol == symbol)
+        )
+        coin_sent = result.scalar_one_or_none()
+        if coin_sent:
+            return CoinSentimentSchema.model_validate(coin_sent)
 
     insight = await insight_service.get_insights(db, symbol)
     return CoinSentimentSchema(
@@ -89,7 +89,7 @@ async def get_sentiment(
 @router.get("/batch/sentiment", response_model=list[BatchSentimentItem])
 async def batch_sentiment(
     symbols: str = Query(..., description="Comma-separated symbols, e.g. BTC,ETH,SOL"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ) -> list[BatchSentimentItem]:
     """
     Return sentiment for multiple symbols in one request.
@@ -98,6 +98,12 @@ async def batch_sentiment(
     sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()][:20]
     if not sym_list:
         raise HTTPException(status_code=400, detail="No symbols provided")
+
+    if db is None:
+        return [
+            BatchSentimentItem(symbol=sym, sentiment="neutral", confidence=0, updated_at=None)
+            for sym in sym_list
+        ]
 
     result = await db.execute(
         select(CoinSentiment).where(CoinSentiment.symbol.in_(sym_list))
@@ -120,9 +126,12 @@ async def batch_sentiment(
 async def get_insights_history(
     symbol: str,
     limit: int = Query(10, ge=1, le=50),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession | None = Depends(get_optional_db),
 ) -> list[AISummarySchema]:
     """Return historical AI summary records for a symbol (newest first)."""
+    if db is None:
+        return []
+
     result = await db.execute(
         select(AISummary)
         .where(AISummary.symbol == symbol.upper())

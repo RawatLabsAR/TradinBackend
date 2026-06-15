@@ -21,8 +21,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func
+from sqlalchemy import delete, select, desc, func
 
+from app.core.cache import cache
 from app.core.config import settings
 from app.models.ai_summary import AISummary
 from app.models.coin_sentiment import CoinSentiment
@@ -71,7 +72,22 @@ def _coin_name(symbol: str) -> str:
     return _COIN_NAMES.get(symbol.upper(), symbol)
 
 
-async def _get_cached_summary(session: AsyncSession, symbol: str) -> Optional[AISummary]:
+def _ai_memory_key(symbol: str) -> str:
+    return f"ai_insight:{symbol.upper()}"
+
+
+def _cache_insight_response(symbol: str, response: dict) -> None:
+    cache.set(_ai_memory_key(symbol), response, settings.AI_CACHE_MINUTES * 60)
+
+
+def _get_memory_insight(symbol: str) -> Optional[dict]:
+    cached = cache.get(_ai_memory_key(symbol.upper()))
+    return cached if isinstance(cached, dict) else None
+
+
+async def _get_cached_summary(session: AsyncSession | None, symbol: str) -> Optional[AISummary]:
+    if not settings.ENABLE_AI_PERSISTENCE or session is None:
+        return None
     now = datetime.now(timezone.utc)
     result = await session.execute(
         select(AISummary)
@@ -84,9 +100,11 @@ async def _get_cached_summary(session: AsyncSession, symbol: str) -> Optional[AI
 
 
 async def _get_recent_gnews_articles(
-    session: AsyncSession, symbol: str, limit: int = 15
+    session: AsyncSession | None, symbol: str, limit: int = 15
 ) -> list[NewsArticle]:
     """Fetch GNews articles from DB as fallback context."""
+    if session is None or not settings.ENABLE_NEWS_PERSISTENCE:
+        return []
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     sym = symbol.upper()
     result = await session.execute(
@@ -100,7 +118,7 @@ async def _get_recent_gnews_articles(
 
 
 async def _persist_ai_sources(
-    session: AsyncSession,
+    session: AsyncSession | None,
     symbol: str,
     sources: list[dict],
 ) -> None:
@@ -108,6 +126,8 @@ async def _persist_ai_sources(
     Persist news sources that OpenAI found via web search into news_articles.
     These appear alongside GNews articles in the NewsFeed component.
     """
+    if not settings.ENABLE_NEWS_PERSISTENCE or session is None:
+        return
     if not sources:
         return
 
@@ -143,38 +163,76 @@ async def _persist_ai_sources(
 
 
 async def _save_summary(
-    session: AsyncSession,
+    session: AsyncSession | None,
     symbol: str,
     ai_result: dict,
     articles_processed: int,
     prompt_tokens: int,
     completion_tokens: int,
     model_used: str,
-) -> AISummary:
+) -> AISummary | dict:
     cache_minutes = settings.AI_CACHE_MINUTES
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=cache_minutes)
+    symbol_up = symbol.upper()
 
-    summary_obj = AISummary(
-        symbol=symbol.upper(),
-        summary=ai_result.get("summary"),
-        sentiment=ai_result.get("sentiment", "neutral"),
-        confidence=int(ai_result.get("confidence", 0)),
-        positive_factors=ai_result.get("positive_factors", []),
-        negative_factors=ai_result.get("negative_factors", []),
-        market_impact=ai_result.get("market_impact"),
-        key_events=ai_result.get("key_events", []),
-        model_used=model_used,
-        articles_processed=articles_processed,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        expires_at=expires_at,
+    if not settings.ENABLE_AI_PERSISTENCE or session is None:
+        response = {
+            "symbol": symbol_up,
+            "summary": ai_result.get("summary"),
+            "sentiment": ai_result.get("sentiment", "neutral"),
+            "confidence": int(ai_result.get("confidence", 0)),
+            "positive_factors": ai_result.get("positive_factors", []),
+            "negative_factors": ai_result.get("negative_factors", []),
+            "market_impact": ai_result.get("market_impact"),
+            "key_events": ai_result.get("key_events", []),
+            "articles_processed": articles_processed,
+            "last_updated": datetime.now(timezone.utc),
+            "cache_expires": expires_at,
+            "is_stale": False,
+        }
+        _cache_insight_response(symbol_up, response)
+        return response
+
+    existing_result = await session.execute(
+        select(AISummary)
+        .where(AISummary.symbol == symbol_up)
+        .order_by(desc(AISummary.created_at))
+        .limit(1)
     )
-    session.add(summary_obj)
+    summary_obj = existing_result.scalar_one_or_none()
+
+    if summary_obj is None:
+        summary_obj = AISummary(symbol=symbol_up)
+        session.add(summary_obj)
+    else:
+        await session.execute(
+            delete(AISummary).where(
+                AISummary.symbol == symbol_up,
+                AISummary.id != summary_obj.id,
+            )
+        )
+
+    summary_obj.summary = ai_result.get("summary")
+    summary_obj.sentiment = ai_result.get("sentiment", "neutral")
+    summary_obj.confidence = int(ai_result.get("confidence", 0))
+    summary_obj.positive_factors = ai_result.get("positive_factors", [])
+    summary_obj.negative_factors = ai_result.get("negative_factors", [])
+    summary_obj.market_impact = ai_result.get("market_impact")
+    summary_obj.key_events = ai_result.get("key_events", [])
+    summary_obj.model_used = model_used
+    summary_obj.articles_processed = articles_processed
+    summary_obj.prompt_tokens = prompt_tokens
+    summary_obj.completion_tokens = completion_tokens
+    summary_obj.created_at = datetime.now(timezone.utc)
+    summary_obj.expires_at = expires_at
     await session.flush()
 
-    # Upsert coin_sentiment
+    await session.execute(
+        delete(MarketInsight).where(MarketInsight.symbol == symbol_up)
+    )
+
     sent_result = await session.execute(
-        select(CoinSentiment).where(CoinSentiment.symbol == symbol.upper())
+        select(CoinSentiment).where(CoinSentiment.symbol == symbol_up)
     )
     coin_sent = sent_result.scalar_one_or_none()
     if coin_sent:
@@ -185,17 +243,16 @@ async def _save_summary(
     else:
         session.add(
             CoinSentiment(
-                symbol=symbol.upper(),
+                symbol=symbol_up,
                 sentiment=summary_obj.sentiment,
                 confidence=summary_obj.confidence,
                 ai_summary_id=summary_obj.id,
             )
         )
 
-    # Write market insight rows for catalysts + risks
     for factor in (ai_result.get("positive_factors") or [])[:3]:
         session.add(MarketInsight(
-            symbol=symbol.upper(),
+            symbol=symbol_up,
             insight_type="CATALYST",
             content=factor,
             severity="info",
@@ -204,7 +261,7 @@ async def _save_summary(
         ))
     for factor in (ai_result.get("negative_factors") or [])[:3]:
         session.add(MarketInsight(
-            symbol=symbol.upper(),
+            symbol=symbol_up,
             insight_type="RISK",
             content=factor,
             severity="warning",
@@ -234,7 +291,7 @@ def _summary_to_response(s: AISummary, is_stale: bool = False) -> dict:
     }
 
 
-async def get_insights(session: AsyncSession, symbol: str) -> dict:
+async def get_insights(session: AsyncSession | None, symbol: str) -> dict:
     """
     Primary entry point for the API route.
 
@@ -248,11 +305,18 @@ async def get_insights(session: AsyncSession, symbol: str) -> dict:
     symbol = symbol.upper()
     model = settings.AI_MODEL or "gpt-4o-mini"
 
+    mem_cached = _get_memory_insight(symbol)
+    if mem_cached:
+        logger.debug("Memory cache hit for AI insights: %s", symbol)
+        return mem_cached
+
     # ── 1. Cache hit ──────────────────────────────────────────────────────────
     cached = await _get_cached_summary(session, symbol)
     if cached:
         logger.debug("Cache hit for AI insights: %s", symbol)
-        return _summary_to_response(cached)
+        response = _summary_to_response(cached)
+        _cache_insight_response(symbol, response)
+        return response
 
     # ── 2. Web-search analysis (primary) ─────────────────────────────────────
     coin = _coin_name(symbol)
@@ -280,7 +344,11 @@ async def get_insights(session: AsyncSession, symbol: str) -> dict:
             completion_tokens=completion_tokens,
             model_used=f"{model}+web_search",
         )
-        return _summary_to_response(saved)
+        if isinstance(saved, dict):
+            return saved
+        response = _summary_to_response(saved)
+        _cache_insight_response(symbol, response)
+        return response
 
     # ── 3. Fallback: GNews articles from DB ───────────────────────────────────
     logger.warning(
@@ -313,18 +381,23 @@ async def get_insights(session: AsyncSession, symbol: str) -> dict:
             completion_tokens=ct2,
             model_used=model,
         )
-        return _summary_to_response(saved2)
+        if isinstance(saved2, dict):
+            return saved2
+        response = _summary_to_response(saved2)
+        _cache_insight_response(symbol, response)
+        return response
 
     # ── 4. Both paths failed — return last stale record or hard fallback ──────
-    stale_result = await session.execute(
-        select(AISummary)
-        .where(AISummary.symbol == symbol)
-        .order_by(desc(AISummary.created_at))
-        .limit(1)
-    )
-    stale = stale_result.scalar_one_or_none()
-    if stale:
-        return _summary_to_response(stale, is_stale=True)
+    if session is not None and settings.ENABLE_AI_PERSISTENCE:
+        stale_result = await session.execute(
+            select(AISummary)
+            .where(AISummary.symbol == symbol)
+            .order_by(desc(AISummary.created_at))
+            .limit(1)
+        )
+        stale = stale_result.scalar_one_or_none()
+        if stale:
+            return _summary_to_response(stale, is_stale=True)
 
     return {
         **_FALLBACK_RESPONSE,
@@ -336,16 +409,20 @@ async def get_insights(session: AsyncSession, symbol: str) -> dict:
 
 
 async def refresh_insights_for_symbols(
-    session: AsyncSession, symbols: list[str]
+    session: AsyncSession | None, symbols: list[str]
 ) -> None:
     """
     Batch refresh called by the scheduler.
     Skips symbols whose cache is still fresh to avoid unnecessary API calls.
     """
     for symbol in symbols:
-        cached = await _get_cached_summary(session, symbol)
-        if cached:
-            logger.debug("Scheduler: %s AI cache still fresh, skipping", symbol)
+        if settings.ENABLE_AI_PERSISTENCE:
+            cached = await _get_cached_summary(session, symbol)
+            if cached:
+                logger.debug("Scheduler: %s AI cache still fresh, skipping", symbol)
+                continue
+        elif _get_memory_insight(symbol):
+            logger.debug("Scheduler: %s AI memory cache still fresh, skipping", symbol)
             continue
         logger.info("Scheduler: generating AI insights for %s via web search", symbol)
         await get_insights(session, symbol)
