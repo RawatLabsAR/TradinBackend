@@ -11,6 +11,7 @@ class Settings(BaseSettings):
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     APP_NAME: str = "Tradin"
@@ -99,6 +100,7 @@ class Settings(BaseSettings):
     # ── Telegram broadcasting ───────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_DEFAULT_CHAT_ID: str = ""
+    TELEGRAM_WHALE_CHANNEL_ID: str = ""
     BROADCAST_COOLDOWN_SECONDS: int = 30
     BROADCAST_DEDUP_WINDOW_SECONDS: int = 300
     ENABLE_SIGNAL_BROADCAST: bool = True
@@ -119,9 +121,16 @@ class Settings(BaseSettings):
     TOKEN_SEARCH_CACHE_MINUTES: int = 10
 
     # ── Crypto discovery ──────────────────────────────────────────────────────
-    DISCOVERY_SCAN_HOUR: int = 6  # UTC — daily automatic scan
+    ENABLE_DISCOVERY_SCHEDULER: bool = True
+    DISCOVERY_SCAN_INTERVAL_MINUTES: int = 30
+    DISCOVERY_SCAN_HOUR: int = 6  # legacy — unused when interval scheduler is enabled
     DISCOVERY_SCAN_MINUTE: int = 0
     DISCOVERY_CACHE_TTL_HOURS: int = 48
+
+    # ── Whale scanner (in-process scheduler) ─────────────────────────────────
+    ENABLE_WHALE_SCAN_SCHEDULER: bool = True
+    WHALE_SCAN_INTERVAL_MINUTES: int = 30
+    WHALE_SCAN_SCHEDULED_LIMIT: int = 0  # 0 = use MAX_TOKENS_PER_RUN from whale_scanner settings
 
     @property
     def database_url(self) -> str | None:

@@ -1,5 +1,5 @@
-# Render Cron Job — daily whale scanner
-# Deploy as a separate Cron Job service (not the web API).
+# Render Cron Job — optional standalone whale scanner
+# Not required when ENABLE_WHALE_SCAN_SCHEDULER=true on the web service (runs every 30m).
 # Dashboard: New → Cron Job → connect repo → use settings below.
 
 services:

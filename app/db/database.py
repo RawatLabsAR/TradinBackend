@@ -89,6 +89,7 @@ async def create_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await ensure_auth_columns()
+    await ensure_discovery_snapshot_schema()
 
 
 async def ensure_auth_columns() -> None:
@@ -100,6 +101,40 @@ async def ensure_auth_columns() -> None:
     statements = [
         "ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
         "ALTER TABLE scripts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
+
+
+async def ensure_discovery_snapshot_schema() -> None:
+    """Align legacy discovery_snapshots tables with the current ORM schema."""
+    if engine is None:
+        return
+    from sqlalchemy import text
+
+    statements = [
+        "ALTER TABLE discovery_snapshots ADD COLUMN IF NOT EXISTS category VARCHAR(32)",
+        "ALTER TABLE discovery_snapshots ADD COLUMN IF NOT EXISTS chain VARCHAR(32) NOT NULL DEFAULT ''",
+        "ALTER TABLE discovery_snapshots ADD COLUMN IF NOT EXISTS payload JSONB",
+        "ALTER TABLE discovery_snapshots ADD COLUMN IF NOT EXISTS sources_used JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "ALTER TABLE discovery_snapshots ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ",
+        "ALTER TABLE discovery_snapshots ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "UPDATE discovery_snapshots SET category = 'new_dex' WHERE category IS NULL",
+        "UPDATE discovery_snapshots SET chain = '' WHERE chain IS NULL",
+        "UPDATE discovery_snapshots SET sources_used = '[]'::jsonb WHERE sources_used IS NULL",
+        "UPDATE discovery_snapshots SET scanned_at = COALESCE(scanned_at, created_at, NOW()) WHERE scanned_at IS NULL",
+        """
+        DO $$ BEGIN
+            ALTER TABLE discovery_snapshots
+                ADD CONSTRAINT uq_discovery_category_chain UNIQUE (category, chain);
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END $$;
+        """,
     ]
     async with engine.begin() as conn:
         for stmt in statements:
