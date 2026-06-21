@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -36,8 +35,8 @@ from app.broadcast.templates.template_engine import template_engine
 from app.onchain.schedulers.onchain_scheduler import attach_onchain_scheduler
 from app.token_search.schedulers.search_scheduler import attach_token_search_scheduler
 from app.discovery.schedulers.discovery_scheduler import attach_discovery_scheduler
+from app.whale_scanner.scheduler import attach_whale_scan_scheduler
 from app.discovery.cache.discovery_cache import get_cached_discovery
-from app.discovery.services.discovery_service import discovery_service
 from app.onchain.collectors.base import close_session as close_onchain_session
 from app.integrations.telegram.telegram_service import get_telegram_service, init_telegram_service
 import app.models  # ensure all models are registered with Base before create_tables()
@@ -95,18 +94,10 @@ async def lifespan(app: FastAPI):
         logger.info("On-chain persistence disabled — ETL scheduler skipped")
     attach_token_search_scheduler(scheduler)
     attach_discovery_scheduler(scheduler)
+    attach_whale_scan_scheduler(scheduler)
     attach_retention_scheduler(scheduler)
     scheduler.start()
     logger.info("Background schedulers started")
-
-    # Warm discovery cache on first boot when empty
-    try:
-        cached = await get_cached_discovery("new_dex")
-        if not cached or not cached.scanned_at:
-            logger.info("Discovery cache empty — running initial scan in background")
-            asyncio.create_task(discovery_service.run_full_scan())
-    except Exception as exc:
-        logger.warning("Discovery startup scan skipped: %s", exc)
 
     # ── Telegram + Broadcast ─────────────────────────────────────────────────
     if settings.TELEGRAM_BOT_TOKEN:
@@ -223,6 +214,8 @@ async def health_check():
             "telegram": bool(settings.TELEGRAM_BOT_TOKEN),
             "onchain_persistence": settings.ENABLE_ONCHAIN_PERSISTENCE,
             "discovery_persistence": settings.ENABLE_DISCOVERY_PERSISTENCE,
+            "discovery_scheduler": settings.ENABLE_DISCOVERY_SCHEDULER,
+            "whale_scan_scheduler": settings.ENABLE_WHALE_SCAN_SCHEDULER,
             "user_data_sync": database_available(),
             "data_provider": settings.DATA_PROVIDER,
             "discovery_cached": discovery_cached,

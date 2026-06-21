@@ -121,9 +121,16 @@ class Settings(BaseSettings):
     TOKEN_SEARCH_CACHE_MINUTES: int = 10
 
     # ── Crypto discovery ──────────────────────────────────────────────────────
-    DISCOVERY_SCAN_HOUR: int = 6  # UTC — daily automatic scan
+    ENABLE_DISCOVERY_SCHEDULER: bool = True
+    DISCOVERY_SCAN_INTERVAL_MINUTES: int = 30
+    DISCOVERY_SCAN_HOUR: int = 6  # legacy — unused when interval scheduler is enabled
     DISCOVERY_SCAN_MINUTE: int = 0
     DISCOVERY_CACHE_TTL_HOURS: int = 48
+
+    # ── Whale scanner (in-process scheduler) ─────────────────────────────────
+    ENABLE_WHALE_SCAN_SCHEDULER: bool = True
+    WHALE_SCAN_INTERVAL_MINUTES: int = 30
+    WHALE_SCAN_SCHEDULED_LIMIT: int = 0  # 0 = use MAX_TOKENS_PER_RUN from whale_scanner settings
 
     @property
     def database_url(self) -> str | None:
