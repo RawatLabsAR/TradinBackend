@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Optional
+
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.cache import cache
 from app.core.config import settings
 from app.db.database import AsyncSessionLocal
 from app.discovery.types import DiscoveryResult, DiscoveryToken
 from app.discovery.utils import discovery_result_from_payload
+
+logger = logging.getLogger(__name__)
 
 _CACHE_PREFIX = "discovery:results:"
 _METRICS_PREFIX = "discovery:metrics:"
@@ -31,11 +36,15 @@ async def _load_from_db(category: str, chain: Optional[str] = None) -> Optional[
         return None
     from app.discovery.cache.discovery_store import load_snapshot
 
-    async with AsyncSessionLocal() as db:
-        result = await load_snapshot(db, category, chain)
-        if result:
-            cache.set(_cache_key(category, chain), result.to_dict(), ttl=cache_ttl_seconds())
-        return result
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await load_snapshot(db, category, chain)
+            if result:
+                cache.set(_cache_key(category, chain), result.to_dict(), ttl=cache_ttl_seconds())
+            return result
+    except SQLAlchemyError as exc:
+        logger.warning("Discovery DB load failed for %s: %s", category, exc)
+        return None
 
 
 async def get_cached_discovery(category: str, chain: Optional[str] = None) -> Optional[DiscoveryResult]:
@@ -62,9 +71,12 @@ async def set_cached_discovery(
         if settings.ENABLE_DISCOVERY_PERSISTENCE and AsyncSessionLocal is not None:
             from app.discovery.cache.discovery_store import save_snapshot
 
-            async with AsyncSessionLocal() as db:
-                await save_snapshot(db, result, chain)
-                await db.commit()
+            try:
+                async with AsyncSessionLocal() as db:
+                    await save_snapshot(db, result, chain)
+                    await db.commit()
+            except SQLAlchemyError as exc:
+                logger.warning("Discovery DB save failed for %s: %s", result.category, exc)
 
 
 def get_volume_change_pct(token: DiscoveryToken) -> float:

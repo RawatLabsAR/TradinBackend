@@ -21,6 +21,7 @@ from app.api.routes import alerts as alerts_router
 from app.api.routes import onchain as onchain_router
 from app.api.routes import token_search as token_search_router
 from app.api.routes import discovery as discovery_router
+from app.api.routes import whale_scan as whale_scan_router
 from app.api.routes import analytics as analytics_router
 from app.api.routes import auth as auth_router
 from app.api.routes import admin as admin_router
@@ -195,6 +196,7 @@ app.include_router(alerts_router.router, prefix=API_PREFIX)
 app.include_router(onchain_router.router, prefix=API_PREFIX)
 app.include_router(token_search_router.router, prefix=API_PREFIX)
 app.include_router(discovery_router.router, prefix=API_PREFIX)
+app.include_router(whale_scan_router.router, prefix=API_PREFIX)
 app.include_router(analytics_router.router, prefix=API_PREFIX)
 app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(admin_router.router, prefix=API_PREFIX)

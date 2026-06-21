@@ -13,6 +13,7 @@ from app.onchain.collectors.base import close_session as close_onchain_session
 from app.providers.registry import close_market_session
 from app.whale_scanner.discover import discover_raw_candidates, select_scan_batch, upsert_candidates
 from app.whale_scanner.notify import send_digest
+from app.whale_scanner import progress
 from app.whale_scanner.scan import rank_results, scan_candidates
 from app.whale_scanner.settings import whale_scan_settings
 
@@ -43,7 +44,7 @@ def _build_engine():
     )
 
 
-async def run_daily(*, limit: int | None = None) -> dict:
+async def run_daily(*, limit: int | None = None, track_progress: bool = False) -> dict:
     """Full pipeline: discover → scan → notify."""
     if limit is not None:
         whale_scan_settings.MAX_TOKENS_PER_RUN = limit
@@ -55,6 +56,7 @@ async def run_daily(*, limit: int | None = None) -> dict:
         expire_on_commit=False,
     )
     stats: dict = {}
+    run_id: int | None = None
 
     try:
         async with engine.begin() as conn:
@@ -67,6 +69,9 @@ async def run_daily(*, limit: int | None = None) -> dict:
             await db.refresh(run)
             run_id = run.id
 
+        if track_progress:
+            await progress.set_run_id(run_id)
+
         logger.info("Whale scan run #%d starting (dry_run=%s)", run_id, whale_scan_settings.DRY_RUN)
 
         raw = await discover_raw_candidates()
@@ -78,11 +83,24 @@ async def run_daily(*, limit: int | None = None) -> dict:
             batch = await select_scan_batch(db)
             stats["candidates_in_batch"] = len(batch)
 
-        results = await scan_candidates(session_factory, batch)
+        if track_progress:
+            await progress.set_discovered(len(raw), len(batch))
+
+        async def _on_scan_progress(**kwargs) -> None:
+            await progress.tick_scan(**kwargs)
+
+        results = await scan_candidates(
+            session_factory,
+            batch,
+            on_progress=_on_scan_progress if track_progress else None,
+        )
         hits = rank_results(results)
         stats["tokens_scanned"] = len(results)
         stats["whale_hits"] = len(hits)
         stats["whale_events"] = sum(len(h.events) for h in hits)
+
+        if track_progress:
+            await progress.set_notifying()
 
         async with session_factory() as db:
             messages = await send_digest(
@@ -105,9 +123,25 @@ async def run_daily(*, limit: int | None = None) -> dict:
         stats["run_id"] = run_id
         logger.info("Whale scan run #%d complete: %s", run_id, stats)
 
+        if track_progress:
+            await progress.finish_ok(stats=stats)
+
     except Exception as exc:
         logger.exception("Whale scan failed: %s", exc)
         stats["error"] = str(exc)
+        if track_progress:
+            await progress.finish_failed(str(exc))
+        if run_id is not None:
+            try:
+                async with session_factory() as db:
+                    run = await db.get(WhaleScanRun, run_id)
+                    if run and run.status == "running":
+                        run.finished_at = datetime.now(timezone.utc)
+                        run.status = "failed"
+                        run.error = str(exc)
+                        await db.commit()
+            except Exception:
+                logger.exception("Failed to mark whale scan run #%s as failed", run_id)
         raise
     finally:
         await engine.dispose()

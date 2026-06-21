@@ -117,9 +117,13 @@ async def send_digest(
         return 0
 
     if not token or not chat_id:
-        logger.warning(
-            "Telegram not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_WHALE_CHANNEL_ID"
-        )
+        if not token:
+            logger.warning("Telegram bot token missing — set TELEGRAM_BOT_TOKEN in .env")
+        if not chat_id:
+            logger.warning(
+                "Telegram channel missing — set TELEGRAM_WHALE_CHANNEL_ID "
+                "(or TELEGRAM_DEFAULT_CHAT_ID) to your channel chat id, e.g. -1001234567890"
+            )
         return 0
 
     fresh_hits = []

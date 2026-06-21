@@ -11,6 +11,7 @@ class Settings(BaseSettings):
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     APP_NAME: str = "Tradin"
@@ -99,6 +100,7 @@ class Settings(BaseSettings):
     # ── Telegram broadcasting ───────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_DEFAULT_CHAT_ID: str = ""
+    TELEGRAM_WHALE_CHANNEL_ID: str = ""
     BROADCAST_COOLDOWN_SECONDS: int = 30
     BROADCAST_DEDUP_WINDOW_SECONDS: int = 300
     ENABLE_SIGNAL_BROADCAST: bool = True

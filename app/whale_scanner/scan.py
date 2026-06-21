@@ -7,6 +7,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from typing import Awaitable, Callable
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.whale_scan import WhaleScanCandidate
@@ -17,6 +19,8 @@ from app.onchain.types import normalize_address
 from app.whale_scanner.settings import whale_scan_settings
 
 logger = logging.getLogger(__name__)
+
+ScanProgressCallback = Callable[..., Awaitable[None] | None]
 
 
 @dataclass
@@ -81,6 +85,8 @@ async def _scan_one(
 async def scan_candidates(
     session_factory: async_sessionmaker,
     candidates: list[WhaleScanCandidate],
+    *,
+    on_progress: ScanProgressCallback | None = None,
 ) -> list[TokenScanResult]:
     """Scan tokens with bounded concurrency and API-friendly delays."""
     if not candidates:
@@ -89,6 +95,9 @@ async def scan_candidates(
     sem = asyncio.Semaphore(whale_scan_settings.SCAN_CONCURRENCY)
     delay = whale_scan_settings.SCAN_DELAY_MS / 1000.0
     results: list[TokenScanResult] = []
+    total = len(candidates)
+    completed = 0
+    whales_detected = 0
 
     async def worker(candidate: WhaleScanCandidate) -> TokenScanResult:
         async with sem:
@@ -99,12 +108,26 @@ async def scan_candidates(
             return out
 
     tasks = [asyncio.create_task(worker(c)) for c in candidates]
-    gathered = await asyncio.gather(*tasks, return_exceptions=True)
-    for item in gathered:
+    for finished in asyncio.as_completed(tasks):
+        item = await finished
         if isinstance(item, Exception):
             logger.error("Scan worker error: %s", item)
             continue
         results.append(item)
+        completed += 1
+        if item.events:
+            whales_detected += 1
+        if on_progress:
+            label = item.candidate.symbol or item.candidate.token_name or item.candidate.contract_address[:10]
+            maybe = on_progress(
+                completed=completed,
+                total=total,
+                token_label=f"{label} ({item.candidate.chain})",
+                whale_events=len(item.events),
+                whales_detected=whales_detected,
+            )
+            if asyncio.iscoroutine(maybe):
+                await maybe
     return results
 
 
