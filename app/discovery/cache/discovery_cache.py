@@ -1,4 +1,4 @@
-"""Discovery cache — in-memory with optional Supabase Postgres persistence."""
+"""Discovery cache — in-memory with optional Postgres persistence."""
 
 from __future__ import annotations
 

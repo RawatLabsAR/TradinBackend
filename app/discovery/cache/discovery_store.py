@@ -1,4 +1,4 @@
-"""Load/save discovery snapshots in Supabase Postgres."""
+"""Load/save discovery snapshots in PostgreSQL."""
 
 from __future__ import annotations
 

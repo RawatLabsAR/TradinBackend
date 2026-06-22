@@ -32,8 +32,6 @@ def _build_engine():
     connect_args: dict = {}
     if ":6543" in url:
         connect_args["statement_cache_size"] = 0
-    if "supabase.co" in url:
-        connect_args["ssl"] = "require"
 
     return create_async_engine(
         url,

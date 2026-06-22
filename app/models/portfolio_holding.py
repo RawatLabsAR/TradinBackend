@@ -1,4 +1,4 @@
-"""Per-user portfolio holdings — synced via Supabase Postgres."""
+"""Per-user portfolio holdings — synced via PostgreSQL."""
 
 from __future__ import annotations
 

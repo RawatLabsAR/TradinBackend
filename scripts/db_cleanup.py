@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot Supabase cleanup: retention purge + drop obsolete tables."""
+"""One-shot database cleanup: retention purge + drop obsolete tables."""
 
 from __future__ import annotations
 

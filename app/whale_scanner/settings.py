@@ -1,4 +1,4 @@
-"""Whale scanner job settings (Render cron worker)."""
+"""Whale scanner job settings."""
 
 from __future__ import annotations
 

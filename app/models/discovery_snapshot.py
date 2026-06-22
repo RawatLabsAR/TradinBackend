@@ -1,4 +1,4 @@
-"""Persisted discovery scan results — survives restarts on Supabase."""
+"""Persisted discovery scan results — survives restarts in PostgreSQL."""
 
 from __future__ import annotations
 

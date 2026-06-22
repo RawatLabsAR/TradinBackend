@@ -1,4 +1,4 @@
-"""Discovery background scan scheduler — optional Supabase persistence."""
+"""Discovery background scan scheduler — optional Postgres persistence."""
 
 from __future__ import annotations
 

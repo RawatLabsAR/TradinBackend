@@ -1,4 +1,4 @@
-"""Discovery orchestration — in-memory cache with optional Supabase persistence."""
+"""Discovery orchestration — in-memory cache with optional Postgres persistence."""
 
 from __future__ import annotations
 

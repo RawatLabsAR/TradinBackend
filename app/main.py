@@ -209,7 +209,6 @@ async def health_check():
         "ws_subscribed_products": ws_manager.subscribed_products,
         "capabilities": {
             "database": database_available(),
-            "supabase": settings.is_supabase,
             "openai": bool(settings.OPENAI_API_KEY),
             "telegram": bool(settings.TELEGRAM_BOT_TOKEN),
             "onchain_persistence": settings.ENABLE_ONCHAIN_PERSISTENCE,

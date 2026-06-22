@@ -1,19 +1,29 @@
+# Web
 fastapi>=0.115.5
 uvicorn[standard]>=0.32.1
+
+# Database
 sqlalchemy[asyncio]>=2.0.36
 asyncpg>=0.30.0
+
+# HTTP & WebSockets
 aiohttp>=3.11.10
 websockets>=13.1
+
+# Config & validation
 pydantic>=2.11.0
 pydantic-settings>=2.7.0
-python-dotenv>=1.0.1
-cryptography>=44.0.0
-alembic>=1.14.0
-python-multipart>=0.0.19
-openai>=1.60.0
-apscheduler>=3.10.0
-# Pine Script DSL engine
-lark>=1.1.0
-pandas>=2.0.0
+
+# Auth
 PyJWT>=2.10.0
 bcrypt>=4.2.0
+
+# AI
+openai>=1.60.0
+
+# Scheduling
+apscheduler>=3.10.0
+
+# Pine Script engine
+lark>=1.1.0
+numpy>=2.0.0
