@@ -1,4 +1,4 @@
--- On-chain analytics schema migration (PostgreSQL / Supabase)
+-- On-chain analytics schema migration (PostgreSQL)
 -- Run manually if not using create_all, or for reference
 
 CREATE TABLE IF NOT EXISTS onchain_trades (

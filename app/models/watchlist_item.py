@@ -1,4 +1,4 @@
-"""Per-user watchlist — synced via Supabase Postgres."""
+"""Per-user watchlist — synced via PostgreSQL."""
 
 from __future__ import annotations
 

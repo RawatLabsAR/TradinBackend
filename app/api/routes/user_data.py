@@ -1,4 +1,4 @@
-"""User watchlist and portfolio — persisted in Supabase Postgres."""
+"""User watchlist and portfolio — persisted in PostgreSQL."""
 
 from __future__ import annotations
 

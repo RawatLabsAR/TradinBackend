@@ -1,3 +1,3 @@
 -- DEPRECATED — do not run this migration.
--- Discovery results are persisted in `discovery_snapshots` (see supabase/migrations/001_user_data_and_discovery.sql).
+-- Discovery results are persisted in `discovery_snapshots` (see migrations/user_data_and_discovery.sql).
 -- This file previously dropped discovery tables when discovery was in-memory only.

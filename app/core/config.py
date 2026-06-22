@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    # PostgreSQL — use a transaction-pooler URI when hosted on Supabase (port 6543).
+    # PostgreSQL — transaction poolers on port 6543 need statement_cache_size=0.
     DATABASE_URL: str = ""
     DB_POOL_SIZE: int = 3
     DB_MAX_OVERFLOW: int = 5
@@ -48,10 +48,6 @@ class Settings(BaseSettings):
     RETENTION_PAPER_TRADES_DAYS: int = 365
     RETENTION_DISCOVERY_DAYS: int = 7
 
-    # Optional — for health checks / future Realtime (backend uses DATABASE_URL)
-    SUPABASE_URL: str = ""
-    SUPABASE_ANON_KEY: str = ""
-
     # ── Data provider ──────────────────────────────────────────────────────────
     # Accepted values: "coinbase" | "gate"
     DATA_PROVIDER: str = "coinbase"
@@ -73,10 +69,10 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = ""
 
     FRONTEND_URL: str = "http://localhost:5173"
-    # Comma-separated extra origins (e.g. production + preview Vercel URLs)
+    # Comma-separated extra origins (production URL, custom domains, etc.)
     ALLOWED_ORIGINS: str = ""
     # Regex for dynamic preview deployments; set empty to disable
-    CORS_ORIGIN_REGEX: str = r"https://.*\.vercel\.app"
+    CORS_ORIGIN_REGEX: str = ""
 
     CACHE_TTL_PRODUCTS: int = 60
     CACHE_TTL_CANDLES_SHORT: int = 30
@@ -162,10 +158,6 @@ class Settings(BaseSettings):
             if normalized:
                 origins.add(normalized)
         return sorted(origins)
-
-    @property
-    def is_supabase(self) -> bool:
-        return "supabase.co" in self.DATABASE_URL
 
 
 settings = Settings()

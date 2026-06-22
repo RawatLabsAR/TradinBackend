@@ -8,11 +8,9 @@ from app.core.config import settings
 
 def _build_connect_args() -> dict:
     args: dict = {}
-    # Transaction poolers (e.g. Supabase Supavisor on :6543) disable prepared statements.
+    # Transaction poolers on :6543 disable prepared statements.
     if ":6543" in settings.DATABASE_URL:
         args["statement_cache_size"] = 0
-    if "supabase.co" in settings.DATABASE_URL:
-        args["ssl"] = "require"
     return args
 
 
