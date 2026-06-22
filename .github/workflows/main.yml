@@ -1,0 +1,27 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy
+        run: |
+
+          mkdir -p /var/www/Tradin/Backend
+
+          rsync -av --delete \
+            --exclude ".git" \
+            --exclude ".github" \
+            ./ /var/www/Tradin/Backend
+
+          cd /var/www/Tradin/Backend
+
+          docker compose up -d --build
