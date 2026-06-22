@@ -10,12 +10,6 @@ build/
 
 venv/
 .venv/
-env/
-ENV/
-
-.env
-.env.*
-!.env.example
 
 .git/
 .gitignore
