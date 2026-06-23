@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import client_meta, get_current_user
 from app.core.permissions import is_admin, require_script_access
+from app.core.quotas import check_and_increment_quota
 from app.db.database import get_db
 from app.models.user import User
 from app.services.activity_service import log_activity
@@ -230,6 +231,7 @@ async def run_script(
     db: AsyncSession = Depends(get_db),
 ):
     """Execute a Pine Script DSL script against historical candles for `symbol`."""
+    await check_and_increment_quota(db, user, "script_run")
     result = await _execute_run(symbol, payload, db, script_id=None, user=user)
     ip, ua = client_meta(request)
     await log_activity(
@@ -257,6 +259,7 @@ async def run_saved_script(
 ):
     script = await _get_or_404(db, script_id)
     require_script_access(user, script)
+    await check_and_increment_quota(db, user, "script_run")
     result = await _execute_run(symbol, payload, db, script_id=script_id, user=user)
     ip, ua = client_meta(request)
     await log_activity(
@@ -284,6 +287,7 @@ async def backtest_script(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await check_and_increment_quota(db, user, "script_backtest")
     result = await _execute_backtest(symbol, payload, db, script_id=None)
     ip, ua = client_meta(request)
     await log_activity(
@@ -311,6 +315,7 @@ async def backtest_saved_script(
 ):
     script = await _get_or_404(db, script_id)
     require_script_access(user, script)
+    await check_and_increment_quota(db, user, "script_backtest")
     result = await _execute_backtest(symbol, payload, db, script_id=script_id)
     ip, ua = client_meta(request)
     await log_activity(

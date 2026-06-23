@@ -14,7 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
-from app.db.database import get_optional_db
+from app.core.auth import get_current_user
+from app.core.quotas import check_and_increment_quota
+from app.db.database import get_optional_db, get_db
+from app.models.user import User
 from app.models.ai_summary import AISummary
 from app.models.coin_sentiment import CoinSentiment
 from app.schemas.ai_insight import (
@@ -33,12 +36,15 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 @router.get("/insights/{symbol}", response_model=AIInsightResponse)
 async def get_full_insights(
     symbol: str,
+    user: User = Depends(get_current_user),
     db: AsyncSession | None = Depends(get_optional_db),
 ) -> AIInsightResponse:
     """
     Return the full AI market intelligence for a symbol.
     Serves from DB cache; triggers fresh OpenAI analysis only when stale.
     """
+    if db is not None:
+        await check_and_increment_quota(db, user, "ai_insight")
     result = await insight_service.get_insights(db, symbol.upper())
     return AIInsightResponse(**result)
 

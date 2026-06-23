@@ -1,25 +1,15 @@
 """
-Frontend WebSocket endpoint.
-
-Protocol:
-  Client → Server:
-    { "action": "subscribe",   "product_ids": ["BTC-USD", ...] }
-    { "action": "unsubscribe", "product_ids": ["BTC-USD", ...] }
-    { "action": "ping" }
-
-  Server → Client:
-    { "type": "connected",    "client_id": "..." }
-    { "type": "subscribed",   "product_ids": [...] }
-    { "type": "ticker",       "data": { ...ticker fields... } }
-    { "type": "pong" }
-    { "type": "error",        "message": "..." }
+Frontend WebSocket endpoint (authenticated via ?token= JWT query param).
 """
 
 import json
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
+from app.db.database import AsyncSessionLocal
+from app.core.auth import get_user_from_ws_token
 from app.websocket.manager import ws_manager
 from app.websocket.registry import get_active_ws_client
 
@@ -29,6 +19,18 @@ logger = logging.getLogger(__name__)
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    token = websocket.query_params.get("token")
+    if AsyncSessionLocal is None:
+        await websocket.close(code=1011, reason="Database unavailable")
+        return
+
+    async with AsyncSessionLocal() as db:
+        try:
+            await get_user_from_ws_token(token, db)
+        except Exception:
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+
     client_id = await ws_manager.connect(websocket)
 
     try:
@@ -38,6 +40,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         })
 
         while True:
+            if websocket.client_state == WebSocketState.DISCONNECTED:
+                break
             raw = await websocket.receive_text()
 
             try:
@@ -63,7 +67,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 product_ids = [p.upper() for p in product_ids]
                 await ws_manager.subscribe(client_id, product_ids)
 
-                # Ensure the active exchange WS client is subscribed to these products
                 ws_client = get_active_ws_client()
                 if ws_client:
                     ws_client.add_products(product_ids)

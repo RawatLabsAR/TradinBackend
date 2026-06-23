@@ -64,9 +64,70 @@ class Settings(BaseSettings):
 
     # ── Auth / users ──────────────────────────────────────────────────────────
     JWT_SECRET: str = "change-me-in-production-use-long-random-string"
-    JWT_EXPIRE_HOURS: int = 72
+    JWT_EXPIRE_MINUTES: int = 60
+    JWT_REFRESH_EXPIRE_DAYS: int = 30
+    JWT_EXPIRE_HOURS: int = 72  # legacy alias; prefer JWT_EXPIRE_MINUTES
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = ""
+    REQUIRE_EMAIL_VERIFICATION: bool = True
+    LOGIN_MAX_ATTEMPTS: int = 5
+    LOGIN_LOCKOUT_MINUTES: int = 15
+    REGISTRATION_ENABLED: bool = True
+
+    # ── Google OAuth ──────────────────────────────────────────────────────────
+    GOOGLE_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_OAUTH_CLIENT_SECRET: str = ""
+
+    # ── Email (SMTP) ──────────────────────────────────────────────────────────
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "Tradin"
+    SMTP_USE_TLS: bool = True
+    SMTP_BCC_SELF: bool = False
+
+    # ── Usage quotas (daily per user) ─────────────────────────────────────────
+    QUOTA_AI_INSIGHTS_FREE: int = 10
+    QUOTA_AI_INSIGHTS_STARTER: int = 50
+    QUOTA_AI_INSIGHTS_PRO: int = 200
+    QUOTA_SCRIPT_RUN_FREE: int = 20
+    QUOTA_SCRIPT_RUN_STARTER: int = 100
+    QUOTA_SCRIPT_RUN_PRO: int = 500
+    QUOTA_SCRIPT_BACKTEST_FREE: int = 10
+    QUOTA_SCRIPT_BACKTEST_STARTER: int = 50
+    QUOTA_SCRIPT_BACKTEST_PRO: int = 200
+
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    RATE_LIMIT_DEFAULT: str = "200/minute"
+    RATE_LIMIT_AUTH: str = "10/minute"
+    RATE_LIMIT_REGISTER: str = "5/minute"
+
+    # ── Sentry ────────────────────────────────────────────────────────────────
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "development"
+
+    # ── Stripe billing ────────────────────────────────────────────────────────
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_ID_STARTER: str = ""
+    STRIPE_PRICE_ID_PRO: str = ""
+    STRIPE_SUCCESS_URL: str = ""
+    STRIPE_CANCEL_URL: str = ""
+
+    # ── Razorpay billing ──────────────────────────────────────────────────────
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+    RAZORPAY_PLAN_ID_STARTER: str = ""
+    RAZORPAY_PLAN_ID_PRO: str = ""
+
+    # Display prices (fallback for /billing/plans)
+    PLAN_STARTER_USD: int = 12
+    PLAN_PRO_USD: int = 29
+    PLAN_STARTER_INR: int = 999
+    PLAN_PRO_INR: int = 2499
 
     FRONTEND_URL: str = "http://localhost:5173"
     # Comma-separated extra origins (production URL, custom domains, etc.)
@@ -133,6 +194,8 @@ class Settings(BaseSettings):
         url = self.DATABASE_URL.strip()
         if not url:
             return None
+        if url.startswith("sqlite+aiosqlite://"):
+            return url
         if url.startswith("postgres://"):
             url = "postgresql+asyncpg://" + url[len("postgres://") :]
         elif url.startswith("postgresql://"):
@@ -140,7 +203,7 @@ class Settings(BaseSettings):
         elif not url.startswith("postgresql+asyncpg://"):
             raise ValueError(
                 "DATABASE_URL must start with postgresql://, postgres://, "
-                "or postgresql+asyncpg://"
+                "postgresql+asyncpg://, or sqlite+aiosqlite://"
             )
         return url
 
