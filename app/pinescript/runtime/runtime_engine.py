@@ -328,7 +328,17 @@ class RuntimeEngine:
 
         elif method == "exit":
             label = str(args[0]) if args else "exit"
-            ctx.strategy.emit_exit(label, price, ctx.bar_index, ts)
+            stop_val = limit_val = None
+            if "stop" in node.kwargs:
+                stop_val = self.run(node.kwargs["stop"], ctx)
+            if "limit" in node.kwargs:
+                limit_val = self.run(node.kwargs["limit"], ctx)
+            if stop_val is not None or limit_val is not None:
+                stop_f = float(stop_val) if stop_val is not None and not isinstance(stop_val, SeriesValue) else None
+                limit_f = float(limit_val) if limit_val is not None and not isinstance(limit_val, SeriesValue) else None
+                ctx.strategy.set_bracket(stop_f, limit_f)
+            else:
+                ctx.strategy.emit_exit(label, price, ctx.bar_index, ts)
 
         elif method == "close":
             target = str(args[0]) if args else None

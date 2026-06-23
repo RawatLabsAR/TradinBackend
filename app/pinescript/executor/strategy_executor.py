@@ -142,6 +142,13 @@ async def _run_loop(
     for i in range(n):
         ctx.set_bar(i)
         engine.run(ast, ctx)
+        ctx.strategy.check_bar_exits(
+            float(candle_data["high"][i]),
+            float(candle_data["low"][i]),
+            float(candle_data["close"][i]),
+            i,
+            timestamps[i] if i < len(timestamps) else "",
+        )
         for sig in ctx.strategy.flush_signals():
             all_signals.append(_signal_to_dict(sig))
 

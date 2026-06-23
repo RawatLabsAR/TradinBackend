@@ -108,7 +108,7 @@ async def run_backtest(
         )
 
     # Build trade records from signals
-    trades = _build_trades(exec_result.signals, candles)
+    trades = _build_trades(exec_result.signals, candles, fee_pct=fee_pct)
 
     # Compute equity curve
     equity_curve = _compute_equity_curve(trades, initial_capital, len(candles))
@@ -160,6 +160,7 @@ async def run_backtest(
 def _build_trades(
     signals: list[dict],
     candles: list[dict],
+    fee_pct: float = 0.001,
 ) -> list[TradeRecord]:
     """Pair entry/exit signals into TradeRecord objects."""
     timestamps = [c.get("start", "") for c in candles]
@@ -191,7 +192,7 @@ def _build_trades(
                 p_out = sig.get("price", 0)
                 is_long = entry.get("direction") == "buy"
                 raw_pnl = (p_out - p_in) / p_in if is_long else (p_in - p_out) / p_in
-                net = raw_pnl - 2 * 0.001  # approx fee
+                net = raw_pnl - 2 * fee_pct
                 trades.append(TradeRecord(
                     entry_bar=bi_in,
                     exit_bar=bi_out,
