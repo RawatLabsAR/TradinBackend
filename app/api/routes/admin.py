@@ -45,7 +45,7 @@ async def admin_list_users(
 ) -> UserListResponse:
     users, total = await list_users(db, limit=limit, offset=offset)
     return UserListResponse(
-        users=[UserOut.model_validate(u) for u in users],
+        users=[UserOut.from_user(u) for u in users],
         total=total,
     )
 
@@ -82,7 +82,7 @@ async def admin_create_user(
     )
     await db.commit()
     await db.refresh(user)
-    return UserOut.model_validate(user)
+    return UserOut.from_user(user)
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
@@ -120,7 +120,7 @@ async def admin_update_user(
     )
     await db.commit()
     await db.refresh(user)
-    return UserOut.model_validate(user)
+    return UserOut.from_user(user)
 
 
 @router.get("/activity/filters", response_model=ActivityFilterOptions)

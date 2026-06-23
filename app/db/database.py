@@ -19,6 +19,9 @@ def _build_engine() -> Optional[AsyncEngine]:
     if url is None:
         return None
 
+    if url.startswith("sqlite"):
+        return create_async_engine(url, echo=settings.DEBUG)
+
     return create_async_engine(
         url,
         echo=settings.DEBUG,
@@ -87,7 +90,33 @@ async def create_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await ensure_auth_columns()
+    await ensure_user_saas_columns()
+    await ensure_oauth_columns()
+    await ensure_billing_columns()
     await ensure_discovery_snapshot_schema()
+
+
+async def ensure_user_saas_columns() -> None:
+    """Add SaaS user columns and new tables (idempotent on PostgreSQL)."""
+    if engine is None:
+        return
+    from sqlalchemy import text
+
+    statements = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(32) NOT NULL DEFAULT 'free'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email) WHERE email IS NOT NULL",
+        "UPDATE users SET is_verified = true WHERE role = 'admin' AND is_verified = false",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
 
 
 async def ensure_auth_columns() -> None:
@@ -99,6 +128,54 @@ async def ensure_auth_columns() -> None:
     statements = [
         "ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
         "ALTER TABLE scripts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
+
+
+async def ensure_oauth_columns() -> None:
+    """Add Google OAuth columns (idempotent on PostgreSQL)."""
+    if engine is None:
+        return
+    from sqlalchemy import text
+
+    statements = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(128)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(16) NOT NULL DEFAULT 'local'",
+        "ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_id ON users (google_id) WHERE google_id IS NOT NULL",
+        "UPDATE users SET auth_provider = 'local' WHERE auth_provider IS NULL OR auth_provider = ''",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
+
+
+async def ensure_billing_columns() -> None:
+    """Add provider-agnostic billing columns (idempotent on PostgreSQL)."""
+    if engine is None:
+        return
+    from sqlalchemy import text
+
+    statements = [
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_provider VARCHAR(32)",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS provider_customer_id VARCHAR(128)",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS provider_subscription_id VARCHAR(128)",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_id VARCHAR(32) NOT NULL DEFAULT 'free'",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS billing_interval VARCHAR(16) NOT NULL DEFAULT 'month'",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS currency VARCHAR(8)",
+        "UPDATE subscriptions SET plan_id = tier WHERE plan_id IS NULL OR plan_id = ''",
+        "UPDATE subscriptions SET provider_customer_id = stripe_customer_id WHERE provider_customer_id IS NULL AND stripe_customer_id IS NOT NULL",
+        "UPDATE subscriptions SET provider_subscription_id = stripe_subscription_id WHERE provider_subscription_id IS NULL AND stripe_subscription_id IS NOT NULL",
+        "UPDATE subscriptions SET payment_provider = 'stripe' WHERE payment_provider IS NULL AND stripe_subscription_id IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_provider_subscription_id ON subscriptions (provider_subscription_id) WHERE provider_subscription_id IS NOT NULL",
     ]
     async with engine.begin() as conn:
         for stmt in statements:

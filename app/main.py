@@ -1,11 +1,17 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
+from app.core.auth import require_verified_user
 from app.core.errors import register_exception_handlers
+from app.core.rate_limit import limiter
+from app.core.security import SecurityHeadersMiddleware, validate_production_settings
 from app.db.database import AsyncSessionLocal, create_tables, dispose_engine, database_available
 from app.db.retention_scheduler import attach_retention_scheduler
 from app.providers.registry import build_ws_client, close_market_session
@@ -26,6 +32,7 @@ from app.api.routes import auth as auth_router
 from app.api.routes import admin as admin_router
 from app.api.routes import paper_trades as paper_trades_router
 from app.api.routes import user_data as user_data_router
+from app.api.routes import billing as billing_router
 from app.services.user_service import ensure_admin_user
 from app.services.news.news_scheduler import create_scheduler
 from app.services.alert_service import check_alerts_for_ticker
@@ -47,6 +54,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+if settings.SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.SENTRY_ENVIRONMENT,
+            integrations=[StarletteIntegration(), FastApiIntegration()],
+            traces_sample_rate=0.1 if not settings.DEBUG else 0.0,
+        )
+        logger.info("Sentry initialized")
+    except ImportError:
+        logger.warning("sentry-sdk not installed — error tracking disabled")
+
 
 async def on_ticker(ticker: dict) -> None:
     """Fan out exchange ticker updates to all subscribed frontend clients."""
@@ -63,7 +86,7 @@ def _build_ws_client():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ──────────────────────────────────────────────────────────────
+    validate_production_settings()
     logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
 
     try:
@@ -99,7 +122,6 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Background schedulers started")
 
-    # ── Telegram + Broadcast ─────────────────────────────────────────────────
     if settings.TELEGRAM_BOT_TOKEN:
         tg_service = init_telegram_service(settings.TELEGRAM_BOT_TOKEN)
         await tg_service.start()
@@ -127,12 +149,10 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # ── Shutdown ─────────────────────────────────────────────────────────────
     logger.info("Shutting down…")
     scheduler.shutdown(wait=False)
     await client.stop()
 
-    # Shutdown broadcast service
     if settings.TELEGRAM_BOT_TOKEN:
         await broadcast_service.stop()
         try:
@@ -141,91 +161,85 @@ async def lifespan(app: FastAPI):
         except RuntimeError:
             pass
 
-    # Close whichever REST session is open
     await close_market_session()
-
     await close_onchain_session()
-
     await dispose_engine()
     logger.info("Shutdown complete")
 
+
+_docs_url = "/docs" if settings.DEBUG else None
+_redoc_url = "/redoc" if settings.DEBUG else None
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="Real-time crypto market tracking dashboard API",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=_docs_url,
+    redoc_url=_redoc_url,
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 register_exception_handlers(app)
 
 _cors_kwargs: dict = {
     "allow_origins": settings.cors_origins,
     "allow_credentials": True,
-    "allow_methods": ["*"],
-    "allow_headers": ["*"],
+    "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    "allow_headers": ["Authorization", "Content-Type", "Accept", "X-Request-ID"],
 }
 if settings.CORS_ORIGIN_REGEX.strip():
     _cors_kwargs["allow_origin_regex"] = settings.CORS_ORIGIN_REGEX.strip()
 
 app.add_middleware(CORSMiddleware, **_cors_kwargs)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(SlowAPIMiddleware)
 
-# REST routers — all mounted under /api; ws stays at /ws
 API_PREFIX = "/api"
+_auth_required = [Depends(require_verified_user)]
 
 app.include_router(products.router, prefix=API_PREFIX)
 app.include_router(candles.router, prefix=API_PREFIX)
-app.include_router(news_router.router, prefix=API_PREFIX)
-app.include_router(ai_router.router, prefix=API_PREFIX)
-app.include_router(scripts_router.router, prefix=API_PREFIX)
+app.include_router(auth_router.router, prefix=API_PREFIX)
+app.include_router(billing_router.router, prefix=API_PREFIX)
+
+app.include_router(news_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(ai_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(scripts_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(alerts_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(onchain_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(token_search_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(discovery_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(whale_scan_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(analytics_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(paper_trades_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+app.include_router(user_data_router.router, prefix=API_PREFIX, dependencies=_auth_required)
+
 app.include_router(broadcast_router.router, prefix=API_PREFIX)
 app.include_router(broadcast_router.signal_router, prefix=API_PREFIX)
 app.include_router(telegram_router.router, prefix=API_PREFIX)
-app.include_router(alerts_router.router, prefix=API_PREFIX)
-app.include_router(onchain_router.router, prefix=API_PREFIX)
-app.include_router(token_search_router.router, prefix=API_PREFIX)
-app.include_router(discovery_router.router, prefix=API_PREFIX)
-app.include_router(whale_scan_router.router, prefix=API_PREFIX)
-app.include_router(analytics_router.router, prefix=API_PREFIX)
-app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(admin_router.router, prefix=API_PREFIX)
-app.include_router(paper_trades_router.router, prefix=API_PREFIX)
-app.include_router(user_data_router.router, prefix=API_PREFIX)
 
-# WebSocket router (no /api prefix — client connects directly to /ws)
 app.include_router(ws_router.router)
 
 
 @app.get("/health", tags=["health"])
 async def health_check():
-    discovery_cached = bool(await get_cached_discovery("new_dex"))
     return {
         "status": "ok",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "ws_connections": ws_manager.active_connections,
-        "ws_subscribed_products": ws_manager.subscribed_products,
-        "capabilities": {
-            "database": database_available(),
-            "openai": bool(settings.OPENAI_API_KEY),
-            "telegram": bool(settings.TELEGRAM_BOT_TOKEN),
-            "onchain_persistence": settings.ENABLE_ONCHAIN_PERSISTENCE,
-            "discovery_persistence": settings.ENABLE_DISCOVERY_PERSISTENCE,
-            "discovery_scheduler": settings.ENABLE_DISCOVERY_SCHEDULER,
-            "whale_scan_scheduler": settings.ENABLE_WHALE_SCAN_SCHEDULER,
-            "user_data_sync": database_available(),
-            "data_provider": settings.DATA_PROVIDER,
-            "discovery_cached": discovery_cached,
-        },
     }
 
 
 @app.get("/", tags=["health"])
 async def root():
-    return {
+    payload = {
         "message": f"Welcome to {settings.APP_NAME} API",
-        "docs": "/docs",
         "health": "/health",
     }
+    if settings.DEBUG:
+        payload["docs"] = "/docs"
+    return payload

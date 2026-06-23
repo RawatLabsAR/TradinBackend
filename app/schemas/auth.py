@@ -8,27 +8,113 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+class GoogleAuthRequest(BaseModel):
+    id_token: str = Field(min_length=10)
+
+
+class GoogleAuthConfigResponse(BaseModel):
+    enabled: bool
+    client_id: str
+
+
 class LoginRequest(BaseModel):
-    username: str = Field(min_length=2, max_length=64)
+    username: str = Field(min_length=2, max_length=255)
     password: str = Field(min_length=6, max_length=128)
 
 
 class LoginResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: "UserOut"
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    email: str = Field(min_length=5, max_length=255)
+    password: str = Field(min_length=6, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("Username may only contain letters, numbers, hyphens, and underscores")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=10)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=10)
+    password: str = Field(min_length=6, max_length=128)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=10)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=6, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class MessageResponse(BaseModel):
+    message: str
 
 
 class UserOut(BaseModel):
     id: int
     username: str
+    email: Optional[str] = None
     role: Literal["admin", "user"]
+    subscription_tier: str = "free"
     telegram_number: Optional[str] = None
+    auth_provider: str = "local"
+    has_password: bool = True
     is_active: bool
+    is_verified: bool = False
     created_at: datetime
     last_login_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_user(cls, user: object) -> "UserOut":
+        from app.models.user import User as UserModel
+
+        if not isinstance(user, UserModel):
+            return cls.model_validate(user)
+        return cls(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            role=user.role,
+            subscription_tier=user.subscription_tier,
+            telegram_number=user.telegram_number,
+            auth_provider=user.auth_provider,
+            has_password=bool(user.password_hash),
+            is_active=user.is_active,
+            is_verified=user.is_verified,
+            created_at=user.created_at,
+            last_login_at=user.last_login_at,
+        )
 
 
 class UserCreate(BaseModel):

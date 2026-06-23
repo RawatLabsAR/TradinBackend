@@ -25,6 +25,10 @@ from app.models.portfolio_holding import PortfolioHolding
 from app.models.discovery_snapshot import DiscoverySnapshot
 from app.models.user import User
 from app.models.activity_log import ActivityLog
+from app.models.auth_token import EmailVerificationToken, PasswordResetToken, RefreshToken
+from app.models.usage_quota import UsageQuota
+from app.models.subscription import Subscription
+from app.models.billing_event import BillingEvent
 from app.onchain.models.entities import (
     OnchainTrade,
     OnchainOhlcv,
@@ -60,6 +64,12 @@ __all__ = [
     "PriceAlert",
     "User",
     "ActivityLog",
+    "RefreshToken",
+    "EmailVerificationToken",
+    "PasswordResetToken",
+    "UsageQuota",
+    "Subscription",
+    "BillingEvent",
     "PaperTrade",
     "WhaleScanCandidate",
     "WhaleScanRun",
