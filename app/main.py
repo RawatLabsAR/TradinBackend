@@ -36,6 +36,7 @@ from app.api.routes import billing as billing_router
 from app.services.user_service import ensure_admin_user
 from app.services.news.news_scheduler import create_scheduler
 from app.services.alert_service import check_alerts_for_ticker
+from app.services.paper_order_service import check_paper_orders_for_ticker
 from app.broadcast.services.broadcast_service import broadcast_service
 from app.broadcast.schedulers.broadcast_scheduler import attach_broadcast_scheduler
 from app.broadcast.templates.template_engine import template_engine
@@ -77,6 +78,7 @@ async def on_ticker(ticker: dict) -> None:
     if product_id:
         await ws_manager.broadcast_ticker(product_id, ticker)
         await check_alerts_for_ticker(ticker)
+        await check_paper_orders_for_ticker(ticker)
 
 
 def _build_ws_client():

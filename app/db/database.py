@@ -94,6 +94,7 @@ async def create_tables() -> None:
     await ensure_oauth_columns()
     await ensure_billing_columns()
     await ensure_discovery_snapshot_schema()
+    await ensure_paper_trade_columns()
 
 
 async def ensure_user_saas_columns() -> None:
@@ -210,6 +211,28 @@ async def ensure_discovery_snapshot_schema() -> None:
             WHEN duplicate_object THEN NULL;
         END $$;
         """,
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
+
+
+async def ensure_paper_trade_columns() -> None:
+    """Add extended paper trade columns (idempotent on PostgreSQL)."""
+    if engine is None:
+        return
+    from sqlalchemy import text
+
+    statements = [
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS order_type VARCHAR(16) NOT NULL DEFAULT 'market'",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS limit_price DOUBLE PRECISION",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS stop_loss DOUBLE PRECISION",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS take_profit DOUBLE PRECISION",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS script_id INTEGER",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS is_pending INTEGER NOT NULL DEFAULT 0",
     ]
     async with engine.begin() as conn:
         for stmt in statements:

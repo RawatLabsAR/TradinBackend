@@ -74,6 +74,8 @@ class StrategyState:
         self.position: str | None = None     # current open label or None
         self.entry_price: float = 0.0
         self.entry_bar: int = 0
+        self.stop_loss: float | None = None
+        self.take_profit: float | None = None
         self._bar_signals: list[Signal] = []
         self.all_signals: list[Signal] = []
         self.trades: list[dict] = []
@@ -117,6 +119,8 @@ class StrategyState:
         })
         self.capital *= 1.0 + net_pnl
         self.position = None
+        self.stop_loss = None
+        self.take_profit = None
 
         sig = Signal(
             bar_index=bar_idx,
@@ -133,6 +137,40 @@ class StrategyState:
     def emit_close(self, price: float, bar_idx: int, timestamp: str) -> None:
         if self.position is not None:
             self.emit_exit(f"close_{self.position}", price, bar_idx, timestamp)
+
+    def set_bracket(self, stop: float | None = None, limit: float | None = None) -> None:
+        if stop is not None and stop > 0:
+            self.stop_loss = stop
+        if limit is not None and limit > 0:
+            self.take_profit = limit
+
+    def check_bar_exits(
+        self,
+        high: float,
+        low: float,
+        close: float,
+        bar_idx: int,
+        timestamp: str,
+    ) -> None:
+        """Evaluate stop-loss / take-profit against bar range."""
+        if self.position is None:
+            return
+        is_long = "SHORT" not in self.position.upper()
+        exit_price = None
+        if is_long:
+            if self.stop_loss is not None and low <= self.stop_loss:
+                exit_price = self.stop_loss
+            elif self.take_profit is not None and high >= self.take_profit:
+                exit_price = self.take_profit
+        else:
+            if self.stop_loss is not None and high >= self.stop_loss:
+                exit_price = self.stop_loss
+            elif self.take_profit is not None and low <= self.take_profit:
+                exit_price = self.take_profit
+        if exit_price is not None:
+            self.emit_exit("bracket", exit_price, bar_idx, timestamp)
+            self.stop_loss = None
+            self.take_profit = None
 
     def flush_signals(self) -> list[Signal]:
         sigs = self._bar_signals
