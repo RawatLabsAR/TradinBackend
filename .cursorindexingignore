@@ -1,0 +1,20 @@
+# Global index-only exclusions — managed by ~/.cursor/dotfiles
+# Excluded from semantic search; still @-mentionable when needed.
+
+# Test fixtures & snapshots
+**/test/fixtures/
+**/tests/fixtures/
+**/__snapshots__/
+**/*.snap
+
+# Large static assets
+**/public/assets/
+**/static/vendor/
+
+# Migration SQL history
+**/db/migrations/
+**/flyway/
+
+# Documentation archives
+**/docs/archive/
+**/CHANGELOG*.md

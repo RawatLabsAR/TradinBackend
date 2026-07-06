@@ -43,7 +43,7 @@ async def execute_script(
     candles: list[dict],
     symbol: str = "UNKNOWN",
     initial_capital: float = 10_000.0,
-    fee_pct: float = 0.001,
+    fee_pct: float = 0,
     onchain_chain: str | None = None,
     onchain_token_address: str | None = None,
 ) -> ExecutionResult:

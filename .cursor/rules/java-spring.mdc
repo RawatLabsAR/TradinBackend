@@ -1,0 +1,20 @@
+---
+description: Java 21 / Spring Boot conventions
+globs: "**/*.{java,kt}"
+alwaysApply: false
+---
+
+# Java 21 / Spring Boot
+
+## Before editing
+- Read only the controller/service/repository layer involved + its DTO/entity.
+- Entry: `*Application.java`; config in `application.yml` / `application-*.yml`.
+
+## Patterns
+- Constructor injection; no field `@Autowired`.
+- `@Transactional` on service layer only.
+- DTOs for API boundaries; entities never exposed directly.
+
+## Scope
+- Never index or read `target/`, `.gradle/`, or `build/`.
+- Flyway/Liquibase: read only the specific migration file being changed.

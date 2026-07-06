@@ -1,0 +1,28 @@
+---
+description: Core token-efficiency and context discipline for all agent work
+alwaysApply: true
+---
+
+# Token Efficiency (always apply)
+
+## Discovery limits
+- Never scan `node_modules`, `.venv*`, `target/`, `dist/`, `build/`, `uploads/`, `pages/`, logs, binaries, model weights, or lockfiles.
+- No repository-wide `find`, `grep`, or `glob` unless the user explicitly requests a full audit.
+- Prefer `Grep` with `path` + `glob` over broad semantic search or exploratory subagents.
+- Ask before reading more than **5 files** in one turn; list planned paths first.
+- Do not re-read files already in this conversation unless they changed or the edit failed.
+
+## Edit discipline
+- Minimal diff only — patch changed lines; never rewrite whole files when a small edit suffices.
+- No drive-by refactors, comments, or formatting outside the requested scope.
+- No new files (tests, docs, configs) unless requested.
+- Match existing naming, imports, and patterns in the touched module.
+
+## Context loading
+- Start from user `@file` refs, open tabs, or one entrypoint (`main.py`, `Application.java`, `page.tsx`).
+- Trace imports one hop at a time; stop when the call chain is clear.
+- For multi-file edits: declare target files upfront, batch reads, no speculative exploration.
+
+## Response discipline
+- Concise answers; cite code with `startLine:endLine:path` only when relevant.
+- Run commands only when needed to verify or implement.

@@ -115,7 +115,7 @@ async def open_paper_trade(
         side=payload.side,
         entry_price=payload.limit_price if is_pending else payload.entry_price,
         quantity=payload.quantity,
-        fee_pct=payload.fee_pct,
+        fee_pct=0,
         notes=payload.notes,
         source=payload.source,
         order_type=payload.order_type,

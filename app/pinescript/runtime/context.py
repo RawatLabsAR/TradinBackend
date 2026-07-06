@@ -67,7 +67,7 @@ class SeriesValue:
 class StrategyState:
     """Tracks open/closed positions and pending signals for the current bar."""
 
-    def __init__(self, initial_capital: float = 10_000.0, fee_pct: float = 0.001):
+    def __init__(self, initial_capital: float = 10_000.0, fee_pct: float = 0):
         self.initial_capital = initial_capital
         self.fee_pct = fee_pct
         self.capital = initial_capital
@@ -199,7 +199,7 @@ class ExecutionContext:
         timestamps: list[str],
         strategy_name: str = "Script",
         initial_capital: float = 10_000.0,
-        fee_pct: float = 0.001,
+        fee_pct: float = 0,
     ) -> None:
         # Candle series (full history numpy arrays)
         self._series: dict[str, np.ndarray] = candle_data

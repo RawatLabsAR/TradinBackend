@@ -1,0 +1,22 @@
+---
+description: Python/FastAPI conventions
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python / FastAPI
+
+## Stack
+- Python 3.10+, FastAPI, Pydantic v2, uvicorn, async where I/O-bound.
+
+## Before editing
+- Read only: config + the one service/route file involved.
+- Config in `config.py` / `settings.py` / `.env.example` — do not hardcode elsewhere.
+- No reads of `.venv*`, `uploads/`, `__pycache__/`, or `parsed_json/`.
+
+## Patterns
+- Type hints on public functions; Pydantic models for API schemas.
+- Alembic migrations: read only the specific migration being changed.
+
+## Commands
+- Use project scripts (`run.sh`, `Makefile`, `docker compose`) — do not pip-install into agent context.

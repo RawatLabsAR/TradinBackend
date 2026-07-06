@@ -16,7 +16,7 @@ class PaperTradeCreate(BaseModel):
     side: PaperSide
     entry_price: float = Field(gt=0)
     quantity: float = Field(gt=0)
-    fee_pct: float = Field(default=0.001, ge=0, le=0.05)
+    fee_pct: float = Field(default=0, ge=0, le=0.05)
     notes: Optional[str] = Field(default=None, max_length=500)
     source: PaperSource = "manual"
     order_type: PaperOrderType = "market"

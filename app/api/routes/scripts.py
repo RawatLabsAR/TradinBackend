@@ -396,7 +396,7 @@ async def _execute_run(
         candles=candles,
         symbol=symbol,
         initial_capital=payload.initial_capital,
-        fee_pct=payload.fee_pct,
+        fee_pct=0,
     )
 
     await _persist_run(
@@ -408,7 +408,7 @@ async def _execute_run(
         bars=result.bars_executed,
         exec_ms=result.execution_ms,
         capital=payload.initial_capital,
-        fee=payload.fee_pct,
+        fee=0,
         error=result.errors[0] if result.errors else None,
         signals=result.signals,
     )
@@ -456,7 +456,7 @@ async def _execute_backtest(
         symbol=symbol,
         timeframe=payload.timeframe,
         initial_capital=payload.initial_capital,
-        fee_pct=payload.fee_pct,
+        fee_pct=0,
     )
 
     if result.success and script_id is not None:
@@ -464,7 +464,7 @@ async def _execute_backtest(
             db=db, script_id=script_id, symbol=symbol,
             timeframe=payload.timeframe, run_type="backtest",
             bars=result.bars_tested, exec_ms=result.execution_ms,
-            capital=payload.initial_capital, fee=payload.fee_pct,
+            capital=payload.initial_capital, fee=0,
             error=None, signals=result.signals,
         )
         bt = BacktestResultModel(

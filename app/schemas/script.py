@@ -81,7 +81,7 @@ class RunRequest(BaseModel):
     timeframe: str = "1D"
     limit: int = Field(default=300, ge=10, le=2000)
     initial_capital: float = Field(default=10_000.0, ge=100.0)
-    fee_pct: float = Field(default=0.001, ge=0.0, le=0.1)
+    fee_pct: float = Field(default=0, ge=0.0, le=0.1)
     broadcast_telegram: bool = True
 
 
@@ -114,7 +114,7 @@ class BacktestRequest(BaseModel):
     timeframe: str = "1D"
     limit: int = Field(default=500, ge=30, le=2000)
     initial_capital: float = Field(default=10_000.0, ge=100.0)
-    fee_pct: float = Field(default=0.001, ge=0.0, le=0.1)
+    fee_pct: float = Field(default=0, ge=0.0, le=0.1)
 
 
 class TradeSchema(BaseModel):

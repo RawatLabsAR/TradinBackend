@@ -1,0 +1,31 @@
+---
+description: Agent behavior — minimal context, patch-first edits
+alwaysApply: true
+---
+
+# Agent Workflow
+
+## Session start
+- Do not auto-explore the repo. Wait for `@file`, open tabs, or a named module.
+- If scope is unclear, ask once — do not grep the codebase to infer intent.
+
+## File reads
+- Max 5 files per turn without user confirmation.
+- Read order: config → entry route/controller → single service in the call chain.
+- Skip tests, docs, and generated dirs unless the task requires them.
+
+## Edits
+- Use minimal patches; never paste full file rewrites.
+- One concern per change set; no cross-module refactors unless requested.
+- Do not add tests, docs, or config files unless asked.
+
+## Commands
+- No repo-wide `find`, `grep`, or explore subagents for needle queries.
+- Prefer targeted `Grep` with `path` + `glob`.
+- Do not read logs, uploads, or build output for debugging — trace code paths.
+
+## Multi-file changes
+1. List files to touch.
+2. Batch-read (≤5).
+3. Patch each file.
+4. Lint only touched files.

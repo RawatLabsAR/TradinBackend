@@ -82,7 +82,7 @@ async def run_backtest(
     symbol: str = "UNKNOWN",
     timeframe: str = "1D",
     initial_capital: float = 10_000.0,
-    fee_pct: float = 0.001,
+    fee_pct: float = 0,
 ) -> BacktestResult:
     """
     Execute a full backtest.
@@ -160,7 +160,7 @@ async def run_backtest(
 def _build_trades(
     signals: list[dict],
     candles: list[dict],
-    fee_pct: float = 0.001,
+    fee_pct: float = 0,
 ) -> list[TradeRecord]:
     """Pair entry/exit signals into TradeRecord objects."""
     timestamps = [c.get("start", "") for c in candles]

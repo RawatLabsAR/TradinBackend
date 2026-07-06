@@ -1,0 +1,142 @@
+# =============================================================================
+# Global Cursor hard block list — managed by ~/.cursor/dotfiles (.cursorignore)
+# Blocks indexing, @-mentions, Agent reads, Tab, and Inline Edit.
+# Reindex after changes: Cmd/Ctrl+Shift+P → "Reindex Codebase"
+# =============================================================================
+
+# --- Python virtual environments & caches ---
+**/.venv/
+**/.venv*/
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.tox/
+**/.nox/
+**/*.egg-info/
+**/.eggs/
+**/.hypothesis/
+
+# --- Node / frontend ---
+**/node_modules/
+**/.next/
+**/.nuxt/
+**/.svelte-kit/
+**/.turbo/
+**/.parcel-cache/
+**/.cache/
+**/dist/
+**/build/
+**/out/
+**/.storybook-static/
+**/coverage/
+**/.nyc_output/
+
+# --- Java / Spring Boot ---
+**/target/
+**/.gradle/
+**/.mvn/
+**/*.class
+**/*.jar
+!**/src/**/*.jar
+**/*.war
+**/*.ear
+
+# --- Docker / runtime artifacts ---
+**/.docker/
+**/docker-volumes/
+
+# --- AI/ML model weights & caches ---
+**/.cache/huggingface/
+**/.huggingface/
+**/models/
+**/checkpoints/
+**/weights/
+**/*.pt
+**/*.pth
+**/*.onnx
+**/*.safetensors
+**/*.ckpt
+**/*.bin
+**/*.h5
+**/*.pb
+**/*.tflite
+**/*.npy
+**/*.npz
+**/*.pkl
+**/*.pickle
+**/*.joblib
+
+# --- Logs, temp, OS ---
+**/*.log
+**/*.log.*
+**/logs/
+**/tmp/
+**/temp/
+**/.tmp/
+**/*.tmp
+**/*.swp
+**/*.swo
+**/.DS_Store
+**/Thumbs.db
+
+# --- Secrets & credentials ---
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/credentials.json
+**/secrets.*
+**/*secret*
+**/*credential*
+
+# --- Large binaries & media ---
+**/*.pdf
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.webp
+**/*.bmp
+**/*.tif
+**/*.tiff
+**/*.mp4
+**/*.mov
+**/*.avi
+**/*.zip
+**/*.tar
+**/*.gz
+**/*.7z
+**/*.rar
+**/*.iso
+**/*.dmg
+
+# --- Lockfiles ---
+**/package-lock.json
+**/pnpm-lock.json
+**/yarn.lock
+**/bun.lockb
+**/poetry.lock
+**/Pipfile.lock
+**/composer.lock
+**/Gemfile.lock
+
+# --- IDE / editor ---
+**/.idea/
+**/.vscode/
+**/.cursor/projects/
+
+# --- Generated / vendored ---
+**/vendor/
+**/third_party/
+**/generated/
+**/__generated__/
+**/*.min.js
+**/*.min.css
+**/*.map

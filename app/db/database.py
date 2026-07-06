@@ -95,6 +95,42 @@ async def create_tables() -> None:
     await ensure_billing_columns()
     await ensure_discovery_snapshot_schema()
     await ensure_paper_trade_columns()
+    await ensure_zero_paper_fees()
+
+
+async def ensure_zero_paper_fees() -> None:
+    """Zero fee_pct on all paper trades and recalculate closed PnL without fees."""
+    if AsyncSessionLocal is None:
+        return
+    from sqlalchemy import select, update
+
+    from app.models.paper_trade import PaperTrade
+    from app.services.paper_trade_service import compute_closed_pnl
+
+    async with AsyncSessionLocal() as db:
+        try:
+            await db.execute(
+                update(PaperTrade).where(PaperTrade.fee_pct != 0).values(fee_pct=0)
+            )
+            result = await db.execute(
+                select(PaperTrade).where(
+                    PaperTrade.closed_at.isnot(None),
+                    PaperTrade.exit_price.isnot(None),
+                )
+            )
+            for trade in result.scalars().all():
+                pnl, pnl_pct = compute_closed_pnl(
+                    trade.side,
+                    trade.entry_price,
+                    trade.exit_price,
+                    trade.quantity,
+                    0,
+                )
+                trade.pnl = round(pnl, 4)
+                trade.pnl_pct = round(pnl_pct, 4)
+            await db.commit()
+        except Exception:
+            await db.rollback()
 
 
 async def ensure_user_saas_columns() -> None:

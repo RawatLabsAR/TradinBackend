@@ -1,0 +1,20 @@
+---
+description: React / Next.js frontend conventions
+globs: "**/*.{tsx,jsx,ts,js}"
+alwaysApply: false
+---
+
+# React / Next.js
+
+## Before editing
+- Read the page/component + its direct hook/util imports only.
+- App Router: `app/` layout → page → colocated components.
+- Pages Router: `pages/` → `_app` → shared `components/`.
+
+## Patterns
+- Functional components; extract hooks for reusable logic.
+- Server Components by default (App Router); `'use client'` only when needed.
+
+## Scope
+- Never read `node_modules/`, `.next/`, `dist/`, or `coverage/`.
+- For API calls, read the matching backend route — do not scan all endpoints.
